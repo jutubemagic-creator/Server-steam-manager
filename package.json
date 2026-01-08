@@ -1,27 +1,44 @@
 {
-  "name": "steam-manager-server",
+  "name": "steam-manager-backend",
   "version": "2.0.0",
-  "description": "Steam Account Manager PRO - Complete Server",
+  "description": "Full Steam Account Manager with AI bots and marketplace",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "bot": "node telegram-bot.js"
+    "bots": "node steam-bots/bot-manager.js",
+    "build": "electron-builder",
+    "docker": "docker-compose up -d"
   },
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.0",
+    "sqlite3": "^5.1.6",
+    "mongoose": "^7.0.0",
+    "node-steam-user": "^5.0.0",
+    "node-steam-totp": "^2.1.0",
+    "node-steam-tradeoffer-manager": "^2.10.0",
+    "node-steamcommunity": "^3.44.0",
+    "node-steam-market": "^2.3.2",
+    "axios": "^1.4.0",
+    "bcrypt": "^5.1.0",
+    "jsonwebtoken": "^9.0.0",
+    "winston": "^3.9.0",
     "cors": "^2.8.5",
-    "node-telegram-bot-api": "^0.61.0",
-    "dotenv": "^16.3.1"
+    "helmet": "^7.0.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.10.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.32.0",
+    "puppeteer": "^20.7.0",
+    "cheerio": "^1.0.0-rc.12",
+    "node-cron": "^3.0.2",
+    "uuid": "^9.0.0",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.4.0"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "keywords": ["steam", "manager", "telegram", "webapp"],
-  "author": "Your Name",
-  "license": "MIT"
+    "nodemon": "^2.0.22",
+    "@electron-forge/cli": "^6.2.0"
+  }
 }
