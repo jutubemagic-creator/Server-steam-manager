@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Account Manager | Безопасный мультиаккаунт</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Боковая панель -->
+        <div class="sidebar">
+            <div class="logo">
+                <i class="fab fa-steam"></i>
+                <h2>Steam Manager PRO</h2>
+                <span class="version">v2.0</span>
+            </div>
+            
+            <div class="status">
+                <div class="status-indicator online"></div>
+                <span>Система активна</span>
+                <div class="proxy-status">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Прокси: <span id="proxy-count">12/12</span></span>
+                </div>
+            </div>
+            
+            <nav class="menu">
+                <a href="#" class="active" data-page="accounts">
+                    <i class="fas fa-users"></i>
+                    Аккаунты
+                    <span class="badge" id="account-count">0</span>
+                </a>
+                <a href="#" data-page="farming">
+                    <i class="fas fa-seedling"></i>
+                    Фарминг
+                    <span class="badge farming" id="farming-count">0</span>
+                </a>
+                <a href="#" data-page="trading">
+                    <i class="fas fa-exchange-alt"></i>
+                    Обмены
+                    <span class="badge trade" id="trade-count">0</span>
+                </a>
+                <a href="#" data-page="drops">
+                    <i class="fas fa-gift"></i>
+                    Дропы
+                    <span class="badge drop" id="drop-count">0</span>
+                </a>
+                <a href="#" data-page="settings">
+                    <i class="fas fa-cog"></i>
+                    Настройки
+                </a>
+                <a href="#" data-page="security">
+                    <i class="fas fa-shield-alt"></i>
+                    Безопасность
+                </a>
+            </nav>
+            
+            <div class="system-info">
+                <div class="info-item">
+                    <i class="fas fa-memory"></i>
+                    <span>Память: <span id="memory-usage">34%</span></span>
+                </div>
+                <div class="info-item">
+                    <i class="fas fa-network-wired"></i>
+                    <span>Сеть: <span id="network-status">Стабильная</span></span>
+                </div>
+                <div class="info-item">
+                    <i class="fas fa-robot"></i>
+                    <span>Боты: <span id="bots-active">0/0</span></span>
+                </div>
+            </div>
+
+            <div class="quick-actions">
+                <button class="quick-btn" id="bulk-actions-btn" title="Массовые действия">
+                    <i class="fas fa-layer-group"></i>
+                </button>
+                <button class="quick-btn" id="claim-all-drops" title="Забрать все дропы">
+                    <i class="fas fa-gifts"></i>
+                </button>
+                <button class="quick-btn" id="start-all-farming" title="Запустить весь фарминг">
+                    <i class="fas fa-play-circle"></i>
+                </button>
+                <button class="quick-btn" id="stop-all" title="Остановить всех">
+                    <i class="fas fa-stop-circle"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Основной контент -->
+        <div class="main-content">
+            <!-- Заголовок -->
+            <header class="header">
+                <h1><i class="fas fa-user-cog"></i> Управление аккаунтами Steam</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" id="add-account">
+                        <i class="fas fa-plus"></i> Добавить аккаунт
+                    </button>
+                    <button class="btn btn-secondary" id="import-accounts">
+                        <i class="fas fa-file-import"></i> Импорт
+                    </button>
+                    <button class="btn btn-warning" id="export-accounts">
+                        <i class="fas fa-file-export"></i> Экспорт
+                    </button>
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="search-accounts" placeholder="Поиск аккаунтов...">
+                    </div>
+                </div>
+            </header>
+
+            <!-- Статистика -->
+            <div class="stats-grid">
+                <div class="stat-card blue">
+                    <i class="fas fa-user-friends"></i>
+                    <div>
+                        <h3>Всего аккаунтов</h3>
+                        <p class="stat-value" id="total-accounts">0</p>
+                    </div>
+                </div>
+                <div class="stat-card green">
+                    <i class="fas fa-seedling"></i>
+                    <div>
+                        <h3>Активно фармят</h3>
+                        <p class="stat-value" id="farming-now">0</p>
+                    </div>
+                </div>
+                <div class="stat-card orange">
+                    <i class="fas fa-gift"></i>
+                    <div>
+                        <h3>Дропы доступны</h3>
+                        <p class="stat-value" id="drops-available">0</p>
+                    </div>
+                </div>
+                <div class="stat-card red">
+                    <i class="fas fa-shield-alt"></i>
+                    <div>
+                        <h3>Уровень риска</h3>
+                        <p class="stat-value" id="ban-risk">Низкий</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Фильтры и быстрые действия -->
+            <div class="action-bar">
+                <div class="filters">
+                    <select id="status-filter">
+                        <option value="all">Все статусы</option>
+                        <option value="online">Online</option>
+                        <option value="farming">Фарминг</option>
+                        <option value="offline">Offline</option>
+                        <option value="error">Ошибка</option>
+                    </select>
+                    <select id="country-filter">
+                        <option value="all">Все страны</option>
+                        <option value="ru">🇷🇺 Россия</option>
+                        <option value="us">🇺🇸 США</option>
+                        <option value="eu">🇪🇺 Европа</option>
+                        <option value="other">Другие</option>
+                    </select>
+                    <select id="game-filter">
+                        <option value="all">Все игры</option>
+                        <option value="cs2">CS2</option>
+                        <option value="csgo">CS:GO</option>
+                        <option value="dota2">Dota 2</option>
+                        <option value="tf2">Team Fortress 2</option>
+                    </select>
+                </div>
+                <div class="bulk-controls">
+                    <button class="btn btn-small" id="select-all">
+                        <i class="fas fa-check-square"></i> Выбрать все
+                    </button>
+                    <button class="btn btn-small btn-success" id="start-selected">
+                        <i class="fas fa-play"></i> Запустить выбранные
+                    </button>
+                    <button class="btn btn-small btn-danger" id="stop-selected">
+                        <i class="fas fa-stop"></i> Остановить выбранные
+                    </button>
+                </div>
+            </div>
+
+            <!-- Список аккаунтов -->
+            <div class="accounts-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-list"></i> Список аккаунтов (<span id="filtered-count">0</span>)</h2>
+                    <div class="section-actions">
+                        <button class="btn btn-small" id="refresh-list">
+                            <i class="fas fa-sync-alt"></i> Обновить
+                        </button>
+                        <button class="btn btn-small btn-info" id="check-drops">
+                            <i class="fas fa-gift"></i> Проверить дропы
+                        </button>
+                    </div>
+                </div>
+
+                <div class="accounts-table">
+                    <div class="table-header">
+                        <div class="col-checkbox"><input type="checkbox" id="select-all-checkbox"></div>
+                        <div class="col-account">Аккаунт</div>
+                        <div class="col-status">Статус</div>
+                        <div class="col-proxy">Прокси/IP</div>
+                        <div class="col-game">Игра / Дроп</div>
+                        <div class="col-uptime">Время работы</div>
+                        <div class="col-actions">Действия</div>
+                    </div>
+                    
+                    <div class="table-body" id="accounts-list">
+                        <!-- Аккаунты будут добавляться через JavaScript -->
+                        <div class="empty-state">
+                            <i class="fas fa-user-plus fa-3x"></i>
+                            <h3>Нет добавленных аккаунтов</h3>
+                            <p>Добавьте свой первый аккаунт Steam для начала работы</p>
+                            <button class="btn btn-primary" id="add-first-account">
+                                <i class="fas fa-plus"></i> Добавить первый аккаунт
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Пагинация -->
+                <div class="pagination">
+                    <button class="pagination-btn" id="prev-page" disabled>
+                        <i class="fas fa-chevron-left"></i> Назад
+                    </button>
+                    <span class="page-info">Страница <span id="current-page">1</span> из <span id="total-pages">1</span></span>
+                    <button class="pagination-btn" id="next-page" disabled>
+                        Вперед <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <select id="page-size">
+                        <option value="10">10 на странице</option>
+                        <option value="25" selected>25 на странице</option>
+                        <option value="50">50 на странице</option>
+                        <option value="100">100 на странице</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Блок с логами -->
+            <div class="logs-section">
+                <div class="logs-header">
+                    <h3><i class="fas fa-terminal"></i> Логи системы</h3>
+                    <div class="log-controls">
+                        <button class="btn btn-small" id="clear-logs">
+                            <i class="fas fa-trash"></i> Очистить
+                        </button>
+                        <button class="btn btn-small" id="pause-logs">
+                            <i class="fas fa-pause"></i> Пауза
+                        </button>
+                    </div>
+                </div>
+                <div class="logs-container" id="system-logs">
+                    <div class="log-entry info">
+                        <span class="log-time">[12:34:56]</span>
+                        <span class="log-message">Система инициализирована. Добро пожаловать!</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальные окна -->
+
+    <!-- Модальное окно добавления аккаунта -->
+    <div class="modal" id="add-account-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Добавить новый аккаунт</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="single">Один аккаунт</button>
+                    <button class="tab-btn" data-tab="multiple">Несколько аккаунтов</button>
+                    <button class="tab-btn" data-tab="import">Импорт файла</button>
+                </div>
+                
+                <div class="tab-content active" id="tab-single">
+                    <div class="form-group">
+                        <label for="account-name"><i class="fas fa-user"></i> Имя аккаунта *</label>
+                        <input type="text" id="account-name" placeholder="Мой основной аккаунт">
+                    </div>
+                    <div class="form-group">
+                        <label for="steam-login"><i class="fab fa-steam"></i> Логин Steam *</label>
+                        <input type="text" id="steam-login" placeholder="username или email">
+                    </div>
+                    <div class="form-group">
+                        <label for="steam-password"><i class="fas fa-lock"></i> Пароль *</label>
+                        <input type="password" id="steam-password" placeholder="Введите пароль">
+                        <button type="button" class="show-password" id="show-password-btn">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-group">
+                        <label for="steam-shared-secret"><i class="fas fa-mobile-alt"></i> Shared Secret (2FA)</label>
+                        <input type="text" id="steam-shared-secret" placeholder="Необязательно для 2FA">
+                        <small>Нужен для автоматического генерации кодов</small>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-multiple">
+                    <div class="form-group">
+                        <label><i class="fas fa-list"></i> Список аккаунтов</label>
+                        <textarea id="multiple-accounts" placeholder="Формат: login:password:name
+Например:
+player1:password123:Основной
+farm1:qwerty456:Фарминг 1
+farm2:asdfgh789:Фарминг 2" rows="6"></textarea>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label><i class="fas fa-globe"></i> Геолокация</label>
+                        <select id="account-country">
+                            <option value="auto">Автовыбор</option>
+                            <option value="ru">🇷🇺 Россия</option>
+                            <option value="us">🇺🇸 США</option>
+                            <option value="de">🇩🇪 Германия</option>
+                            <option value="fr">🇫🇷 Франция</option>
+                            <option value="nl">🇳🇱 Нидерланды</option>
+                            <option value="custom">Свой прокси</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-gamepad"></i> Игра для фарминга</label>
+                        <select id="farming-game">
+                            <option value="cs2">CS2 (Counter-Strike 2)</option>
+                            <option value="csgo">CS:GO (Counter-Strike: Global Offensive)</option>
+                            <option value="dota2">Dota 2</option>
+                            <option value="tf2">Team Fortress 2</option>
+                            <option value="none">Не фармить</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label><i class="fas fa-shield-alt"></i> Уровень изоляции</label>
+                    <div class="radio-group">
+                        <label class="radio-option">
+                            <input type="radio" name="isolation" value="maximum" checked>
+                            <div class="radio-content">
+                                <span class="radio-label high">Максимальный</span>
+                                <small>Контейнер + уникальный прокси + эмуляция железа</small>
+                            </div>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="isolation" value="high">
+                            <div class="radio-content">
+                                <span class="radio-label medium">Высокий</span>
+                                <small>Уникальный прокси + маскировка отпечатков</small>
+                            </div>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="isolation" value="medium">
+                            <div class="radio-content">
+                                <span class="radio-label low">Средний</span>
+                                <small>Общий пул прокси</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label><i class="fas fa-cog"></i> Дополнительные настройки</label>
+                    <div class="checkbox-group">
+                        <label>
+                            <input type="checkbox" id="auto-start" checked>
+                            <span>Запустить аккаунт после добавления</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" id="auto-farm" checked>
+                            <span>Автоматически начать фарминг</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" id="claim-drops">
+                            <span>Автоматически забирать дропы</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" id="enable-trading">
+                            <span>Разрешить обмены</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary close-modal">Отмена</button>
+                <button class="btn btn-success" id="save-account">
+                    <i class="fas fa-save"></i> Сохранить аккаунт
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно выбора дропа -->
+    <div class="modal" id="drop-selection-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-gift"></i> Выбор дропа для <span id="drop-account-name"></span></h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="drop-strategy">
+                    <h4><i class="fas fa-robot"></i> Стратегия автоматического выбора</h4>
+                    <div class="strategy-buttons">
+                        <button class="strategy-btn active" data-strategy="most_expensive">
+                            <i class="fas fa-crown"></i>
+                            <span>Самый дорогой</span>
+                            <small>Автовыбор самого ценного предмета</small>
+                        </button>
+                        <button class="strategy-btn" data-strategy="random">
+                            <i class="fas fa-random"></i>
+                            <span>Случайный</span>
+                            <small>Любой доступный предмет</small>
+                        </button>
+                        <button class="strategy-btn" data-strategy="manual">
+                            <i class="fas fa-hand-pointer"></i>
+                            <span>Вручную</span>
+                            <small>Выбрать предмет самостоятельно</small>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="drops-list" id="available-drops">
+                    <h4><i class="fas fa-box-open"></i> Доступные дропы</h4>
+                    <div class="drops-grid">
+                        <!-- Дропы будут загружены динамически -->
+                    </div>
+                </div>
+                
+                <div class="drop-preview" id="selected-drop-preview">
+                    <div class="preview-placeholder">
+                        <i class="fas fa-gift fa-3x"></i>
+                        <p>Выберите дроп для предпросмотра</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary close-modal">Отмена</button>
+                <button class="btn btn-primary" id="claim-drop-btn">
+                    <i class="fas fa-check"></i> Забрать выбранный дроп
+                </button>
+                <button class="btn btn-success" id="auto-claim-btn">
+                    <i class="fas fa-bolt"></i> Автозабор по стратегии
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно массовых действий -->
+    <div class="modal" id="bulk-actions-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-layer-group"></i> Массовые действия</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="bulk-grid">
+                    <div class="bulk-action-card" data-action="claim-all-drops">
+                        <div class="bulk-icon">
+                            <i class="fas fa-gifts"></i>
+                        </div>
+                        <h4>Забрать все дропы</h4>
+                        <p>Автоматически у всех онлайн аккаунтов</p>
+                        <div class="bulk-stats">
+                            <span>Доступно: <strong id="available-drops-count">0</strong></span>
+                        </div>
+                    </div>
+                    
+                    <div class="bulk-action-card" data-action="start-all-farming">
+                        <div class="bulk-icon">
+                            <i class="fas fa-seedling"></i>
+                        </div>
+                        <h4>Запустить фарминг</h4>
+                        <p>На всех аккаунтах с играми</p>
+                        <div class="bulk-stats">
+                            <span>Можно запустить: <strong id="can-farm-count">0</strong></span>
+                        </div>
+                    </div>
+                    
+                    <div class="bulk-action-card" data-action="stop-all-accounts">
+                        <div class="bulk-icon">
+                            <i class="fas fa-stop-circle"></i>
+                        </div>
+                        <h4>Остановить всех</h4>
+                        <p>Выключить все запущенные аккаунты</p>
+                        <div class="bulk-stats">
+                            <span>Активно: <strong id="active-accounts-count">0</strong></span>
+                        </div>
+                    </div>
+                    
+                    <div class="bulk-action-card" data-action="rotate-proxies">
+                        <div class="bulk-icon">
+                            <i class="fas fa-sync-alt"></i>
+                        </div>
+                        <h4>Сменить прокси</h4>
+                        <p>Обновить IP для всех аккаунтов</p>
+                        <div class="bulk-stats">
+                            <span>Используют: <strong id="proxy-users-count">0</strong></span>
+                        </div>
+                    </div>
+                    
+                    <div class="bulk-action-card" data-action="check-steam-guard">
+                        <div class="bulk-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <h4>Проверить Steam Guard</h4>
+                        <p>Валидация 2FA на всех аккаунтах</p>
+                    </div>
+                    
+                    <div class="bulk-action-card" data-action="export-logs">
+                        <div class="bulk-icon">
+                            <i class="fas fa-file-export"></i>
+                        </div>
+                        <h4>Экспорт логов</h4>
+                        <p>Сохранить логи работы за период</p>
+                    </div>
+                </div>
+                
+                <div class="bulk-options">
+                    <h4><i class="fas fa-cog"></i> Настройки массовых действий</h4>
+                    <div class="option">
+                        <input type="checkbox" id="bulk-delay" checked>
+                        <label for="bulk-delay">Добавлять задержку между действиями</label>
+                    </div>
+                    <div class="option">
+                        <label>Задержка между аккаунтами (сек):</label>
+                        <input type="range" id="bulk-delay-range" min="1" max="60" value="5">
+                        <span id="delay-value">5</span>
+                    </div>
+                    <div class="option">
+                        <label>Выберите аккаунты:</label>
+                        <select id="bulk-accounts-select" multiple>
+                            <option value="all">Все аккаунты</option>
+                            <option value="online">Только онлайн</option>
+                            <option value="offline">Только оффлайн</option>
+                            <option value="farming">Только фармящие</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary close-modal">Отмена</button>
+                <button class="btn btn-primary" id="execute-bulk-action">
+                    <i class="fas fa-play"></i> Выполнить выбранное действие
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div class="notifications-container" id="notifications"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
