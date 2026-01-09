@@ -1,7 +1,7 @@
 {
-  "name": "steam-manager-backend",
+  "name": "steam-manager-pro",
   "version": "2.0.0",
-  "description": "Steam Manager Backend API",
+  "description": "Steam Manager PRO with Emulation",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,19 +10,21 @@
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.0",
-    "cors": "^2.8.5",
     "bcrypt": "^5.1.0",
-    "jsonwebtoken": "^9.0.0",
     "uuid": "^9.0.0",
     "dotenv": "^16.3.0",
-    "axios": "^1.6.0",
-    "node-cache": "^5.1.2",
-    "winston": "^3.9.0",
+    "cors": "^2.8.5",
     "helmet": "^7.0.0",
     "compression": "^1.7.4",
-    "express-rate-limit": "^6.10.0"
+    "express-rate-limit": "^6.10.0",
+    "node-cache": "^5.1.2",
+    "winston": "^3.9.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   }
 }
