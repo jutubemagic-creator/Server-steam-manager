@@ -27,9 +27,8 @@ let updateInterval = null;
 class SteamManager {
   constructor() {
     this.initializeSocket();
-    this.loadFromStorage();
+    this.loadAccounts();
     this.initEventListeners();
-    this.updateAll();
     this.startAutoUpdates();
   }
   
@@ -45,119 +44,55 @@ class SteamManager {
       this.addLog('Отключено от сервера', 'warning');
     });
     
-    socket.on('status-update', (status) => {
-      this.updateUIStatus(status);
+    socket.on('accounts-update', (data) => {
+      accounts = data;
+      this.updateAll();
+    });
+    
+    socket.on('account-updated', (data) => {
+      const index = accounts.findIndex(a => a.id === data.accountId);
+      if (index !== -1) {
+        accounts[index] = { ...accounts[index], ...data.updates };
+        this.updateAll();
+      }
     });
     
     socket.on('new-drop', (data) => {
       this.handleNewDrop(data);
     });
     
+    socket.on('drop-claimed', (data) => {
+      this.handleDropClaimed(data);
+    });
+    
     socket.on('item-sold', (data) => {
       this.handleItemSold(data);
     });
     
-    socket.on('bot-update', (data) => {
-      this.updateBotStatus(data);
-    });
-    
     socket.on('command-success', (data) => {
-      this.addLog(`Команда выполнена: ${data.command} для аккаунта ${data.accountId}`, 'success');
+      this.addLog(`Команда выполнена: ${data.command}`, 'success');
     });
     
     socket.on('command-error', (data) => {
-      this.addLog(`Ошибка команды ${data.command}: ${data.error}`, 'error');
+      this.addLog(`Ошибка: ${data.error}`, 'error');
+    });
+    
+    socket.on('system-log', (log) => {
+      this.addLog(log.message, log.type);
     });
   }
   
-  async loadFromStorage() {
-    const saved = localStorage.getItem('steam_manager_backup');
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        accounts = data.accounts || [];
-        this.addLog('Данные загружены из локального хранилища', 'info');
-      } catch (e) {
-        console.error('Ошибка загрузки:', e);
-        await this.loadDemoData();
-      }
-    } else {
-      await this.loadDemoData();
-    }
-  }
-  
-  async loadDemoData() {
+  async loadAccounts() {
     try {
       const response = await fetch(`${CONFIG.API_URL}/accounts`);
       if (response.ok) {
         accounts = await response.json();
-        this.addLog('Данные загружены с сервера', 'success');
-      } else {
-        throw new Error('Сервер недоступен');
+        this.updateAll();
+        this.addLog(`Загружено ${accounts.length} аккаунтов`, 'success');
       }
     } catch (error) {
-      console.log('Использую демо данные:', error);
-      accounts = this.getDemoAccounts();
-      this.addLog('Загружены демо данные', 'warning');
-    }
-  }
-  
-  getDemoAccounts() {
-    return [
-      {
-        id: "demo_1",
-        name: "Основной аккаунт",
-        login: "player_one",
-        status: "online",
-        proxy: { country: "ru", ip: "195.24.76.123", type: "residential" },
-        game: "CS2",
-        uptime: "4ч 22м",
-        farming: false,
-        country: "ru",
-        isolation: "maximum",
-        lastDrop: { name: "Кейс Prisma 2", price: "$0.45", rarity: "rare" },
-        lastDropTime: "2 часа назад",
-        farmingHours: 12,
-        hasNewDrop: true,
-        creationDate: new Date().toISOString(),
-        inventory: [
-          { name: "AK-47 | Redline", price: 15.50, rarity: "covert" },
-          { name: "Operation Broken Fang Case", price: 0.75, rarity: "common" }
-        ],
-        totalProfit: 45.75,
-        totalDrops: 3,
-        settings: {
-          autoFarm: true,
-          autoTrade: false,
-          priceThreshold: 0.1
-        }
-      }
-      // ... остальные демо аккаунты
-    ];
-  }
-  
-  async saveToStorage() {
-    const data = {
-      accounts: accounts,
-      version: CONFIG.VERSION,
-      lastSave: new Date().toISOString()
-    };
-    localStorage.setItem('steam_manager_backup', JSON.stringify(data));
-  }
-  
-  async saveToServer() {
-    try {
-      const response = await fetch(`${CONFIG.API_URL}/accounts/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts })
-      });
-      
-      if (response.ok) {
-        console.log('Данные синхронизированы с сервером');
-      }
-    } catch (error) {
-      console.error('Ошибка синхронизации:', error);
+      console.error('Ошибка загрузки:', error);
+      this.addLog('Не удалось загрузить аккаунты', 'error');
     }
   }
   
@@ -178,91 +113,58 @@ class SteamManager {
         this.addLog(`Добавлен аккаунт: ${newAccount.name}`, 'success');
         this.showNotification(`Аккаунт "${newAccount.name}" добавлен`, 'success');
         this.updateAll();
-        this.saveToStorage();
         
         return newAccount;
       } else {
-        throw new Error('Ошибка сервера');
+        const error = await response.json();
+        throw new Error(error.error || 'Ошибка сервера');
       }
     } catch (error) {
       console.error('Ошибка добавления:', error);
-      this.showNotification('Ошибка добавления аккаунта', 'error');
+      this.showNotification(`Ошибка: ${error.message}`, 'error');
       return null;
     }
   }
   
   async toggleAccountStatus(accountId) {
-    const account = accounts.find(a => a.id === accountId);
-    if (!account) return;
-    
     try {
-      const command = account.status === 'offline' ? 'start' : 'stop';
+      const account = accounts.find(a => a.id === accountId);
+      if (!account) return;
       
-      if (socket && socket.connected) {
-        socket.emit('bot-command', {
-          command: command,
-          accountId: accountId
-        });
-      } else {
-        // Локальная эмуляция если сокет не доступен
-        account.status = account.status === 'offline' ? 'online' : 'offline';
-        account.farming = false;
-        
-        if (account.status === 'online') {
-          account.uptime = '0ч 1м';
-          this.addLog(`Аккаунт запущен: ${account.name}`, 'success');
-        } else {
-          this.addLog(`Аккаунт остановлен: ${account.name}`, 'info');
-        }
+      const endpoint = account.status === 'offline' ? 'start' : 'stop';
+      const response = await fetch(`${CONFIG.API_URL}/accounts/${accountId}/${endpoint}`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        this.addLog(`Аккаунт ${account.name} ${endpoint === 'start' ? 'запущен' : 'остановлен'}`, 'success');
+        this.loadAccounts(); // Перезагружаем аккаунты
       }
-      
-      this.updateAll();
-      this.saveToStorage();
     } catch (error) {
-      console.error('Ошибка переключения статуса:', error);
+      console.error('Ошибка:', error);
       this.showNotification('Ошибка выполнения команды', 'error');
     }
   }
   
-  async startFarming(accountId, game = 'CS2') {
-    const account = accounts.find(a => a.id === accountId);
-    if (!account) return;
-    
-    if (account.status === 'offline') {
-      this.showNotification('Сначала запустите аккаунт!', 'warning');
-      return;
-    }
-    
+  async startFarming(accountId, game) {
     try {
-      if (socket && socket.connected) {
-        socket.emit('bot-command', {
-          command: 'farm',
-          accountId: accountId,
-          params: { game: game }
-        });
-      } else {
-        // Локальная эмуляция
-        account.status = 'farming';
-        account.farming = true;
-        account.currentGame = game;
-        this.addLog(`Запущен фарминг на: ${account.name}`, 'success');
-      }
+      const response = await fetch(`${CONFIG.API_URL}/accounts/${accountId}/farm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game })
+      });
       
-      this.updateAll();
-      this.saveToStorage();
+      if (response.ok) {
+        this.addLog(`Запущен фарминг на аккаунте`, 'success');
+        this.loadAccounts();
+      }
     } catch (error) {
-      console.error('Ошибка запуска фарминга:', error);
+      console.error('Ошибка:', error);
       this.showNotification('Ошибка запуска фарминга', 'error');
     }
   }
   
   async claimDrop(accountId, strategy = 'most_expensive') {
-    const account = accounts.find(a => a.id === accountId);
-    if (!account || !account.hasNewDrop) {
-      this.showNotification('Нет доступных дропов!', 'warning');
-      return null;
-    }
-    
     try {
       const response = await fetch(`${CONFIG.API_URL}/accounts/${accountId}/claim-drop`, {
         method: 'POST',
@@ -272,64 +174,15 @@ class SteamManager {
       
       if (response.ok) {
         const result = await response.json();
-        account.hasNewDrop = false;
-        account.lastDrop = result.drop;
-        account.totalDrops = (account.totalDrops || 0) + 1;
-        account.totalProfit = (account.totalProfit || 0) + parseFloat(result.drop.price);
-        
-        if (account.inventory) {
-          account.inventory.push({
-            ...result.drop,
-            id: `item_${Date.now()}`,
-            acquired: new Date().toISOString()
-          });
-        }
-        
-        this.addLog(`${account.name}: Получен дроп ${result.drop.name}`, 'success');
         this.showNotification(`Дроп получен: ${result.drop.name}`, 'success');
-        this.updateAll();
-        this.saveToStorage();
-        
+        this.loadAccounts();
         return result.drop;
       }
     } catch (error) {
-      console.error('Ошибка получения дропа:', error);
-      // Локальная эмуляция
-      return this.claimDropLocal(account, strategy);
+      console.error('Ошибка:', error);
+      this.showNotification('Ошибка получения дропа', 'error');
+      return null;
     }
-  }
-  
-  claimDropLocal(account, strategy) {
-    const drops = this.getGameDrops(account.game || 'CS2');
-    let selectedDrop;
-    
-    switch(strategy) {
-      case 'most_expensive':
-        selectedDrop = drops.reduce((max, drop) => drop.price > max.price ? drop : max);
-        break;
-      case 'random':
-        selectedDrop = drops[Math.floor(Math.random() * drops.length)];
-        break;
-      case 'cheapest':
-        selectedDrop = drops.reduce((min, drop) => drop.price < min.price ? drop : min);
-        break;
-      default:
-        selectedDrop = drops[0];
-    }
-    
-    account.hasNewDrop = false;
-    account.lastDrop = selectedDrop;
-    account.totalDrops = (account.totalDrops || 0) + 1;
-    account.totalProfit = (account.totalProfit || 0) + selectedDrop.price;
-    
-    if (!account.inventory) account.inventory = [];
-    account.inventory.push({
-      ...selectedDrop,
-      id: `item_${Date.now()}`,
-      acquired: new Date().toISOString()
-    });
-    
-    return selectedDrop;
   }
   
   async listItemOnMarket(accountId, itemId, price) {
@@ -337,40 +190,40 @@ class SteamManager {
       const response = await fetch(`${CONFIG.API_URL}/market/list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accountId,
-          itemId,
-          price
-        })
+        body: JSON.stringify({ accountId, itemId, price })
       });
       
       if (response.ok) {
         const result = await response.json();
-        this.addLog(`Предмет выставлен на рынок за $${price}`, 'success');
-        this.showNotification('Предмет выставлен на продажу', 'success');
-        return result;
+        this.showNotification(`Предмет выставлен за $${price}`, 'success');
+        this.loadAccounts();
+        return result.listing;
       }
     } catch (error) {
-      console.error('Ошибка выставления предмета:', error);
+      console.error('Ошибка:', error);
       this.showNotification('Ошибка выставления на рынок', 'error');
       return null;
     }
   }
   
-  async getMarketPrices(itemNames) {
+  async bulkAction(action, accountIds, params = {}) {
     try {
-      const response = await fetch(`${CONFIG.API_URL}/market/prices`, {
+      const response = await fetch(`${CONFIG.API_URL}/bulk-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: itemNames })
+        body: JSON.stringify({ action, accountIds, params })
       });
       
       if (response.ok) {
-        return await response.json();
+        const result = await response.json();
+        this.showNotification(`Массовое действие выполнено`, 'success');
+        this.loadAccounts();
+        return result.results;
       }
     } catch (error) {
-      console.error('Ошибка получения цен:', error);
-      return {};
+      console.error('Ошибка:', error);
+      this.showNotification('Ошибка массового действия', 'error');
+      return [];
     }
   }
   
@@ -389,6 +242,7 @@ class SteamManager {
     const online = accounts.filter(a => a.status !== 'offline').length;
     const drops = accounts.filter(a => a.hasNewDrop).length;
     const totalProfit = accounts.reduce((sum, acc) => sum + (acc.totalProfit || 0), 0);
+    const totalDrops = accounts.reduce((sum, acc) => sum + (acc.totalDrops || 0), 0);
     
     this.updateElement('account-count', total);
     this.updateElement('farming-count', farming);
@@ -398,6 +252,9 @@ class SteamManager {
     this.updateElement('drops-available', drops);
     this.updateElement('total-profit', `$${totalProfit.toFixed(2)}`);
     
+    // Обновление в заголовке таблицы
+    this.updateElement('filtered-count', total);
+    
     // Расчет риска
     const risk = this.calculateRiskLevel();
     this.updateElement('ban-risk', risk.level);
@@ -405,9 +262,11 @@ class SteamManager {
   }
   
   calculateRiskLevel() {
+    if (accounts.length === 0) return { level: 'Низкий', color: '#00ff88' };
+    
     const highRiskCount = accounts.filter(a => 
-      a.isolation === 'low' || 
-      a.farmingHours > 100 ||
+      a.isolation === 'medium' || 
+      a.isolation === 'low' ||
       (a.proxy && a.proxy.type === 'datacenter')
     ).length;
     
@@ -439,59 +298,66 @@ class SteamManager {
     const isSelected = selectedAccounts.has(account.id);
     const hasDrop = account.hasNewDrop;
     const profit = account.totalProfit || 0;
+    const statusClass = account.status;
+    const uptime = account.uptime || '0ч 0м';
+    const game = account.game || 'Не выбрана';
+    const drops = account.totalDrops || 0;
+    const farmingHours = account.farmingHours?.toFixed(1) || '0';
     
     return `
       <div class="account-card ${isSelected ? 'selected' : ''}" data-id="${account.id}">
         <div class="col-checkbox">
           <input type="checkbox" class="account-checkbox" data-id="${account.id}" ${isSelected ? 'checked' : ''}>
         </div>
-        <div class="account-info">
-          <div class="avatar" style="background: ${this.getCountryColor(account.country)}">
-            ${account.name.charAt(0)}
-          </div>
-          <div class="account-details">
-            <h4>${account.name}</h4>
-            <div class="account-meta">
-              <span class="login">${account.login}</span>
-              <span class="profit">$${profit.toFixed(2)}</span>
+        <div class="col-account">
+          <div class="account-info">
+            <div class="avatar" style="${this.getAvatarStyle(account.country)}">
+              ${account.name.charAt(0).toUpperCase()}
+            </div>
+            <div class="account-details">
+              <h4>${account.name}</h4>
+              <div class="account-meta">
+                <span class="login">${account.login}</span>
+                <span class="profit">$${profit.toFixed(2)}</span>
+              </div>
             </div>
           </div>
         </div>
-        <div class="status-column">
-          <span class="status-badge ${account.status}">
+        <div class="col-status">
+          <span class="status-badge ${statusClass}">
             ${this.getStatusText(account.status)}
           </span>
-          <div class="uptime">${account.uptime || '0ч 0м'}</div>
+          <div class="uptime">${uptime}</div>
         </div>
-        <div class="proxy-column">
+        <div class="col-proxy">
           <div class="proxy-info">
             <i class="fas fa-globe"></i>
             <span>${account.country?.toUpperCase() || 'AUTO'}</span>
           </div>
-          <div class="proxy-type">${account.proxy?.type || 'unknown'}</div>
+          <div class="proxy-type">${account.isolation || 'unknown'}</div>
         </div>
-        <div class="game-column">
+        <div class="col-game">
           <div class="game-info">
             <div class="game-icon ${hasDrop ? 'has-drop' : ''}">
-              <i class="fas fa-${this.getGameIcon(account.game)}"></i>
+              <i class="fas fa-${this.getGameIcon(game)}"></i>
               ${hasDrop ? '<div class="drop-indicator"><i class="fas fa-gift"></i></div>' : ''}
             </div>
-            <div class="game-name">${account.game || 'Не выбрана'}</div>
+            <div class="game-name">${game}</div>
           </div>
         </div>
-        <div class="stats-column">
+        <div class="col-uptime">
           <div class="stats">
             <div class="stat">
               <i class="fas fa-gift"></i>
-              <span>${account.totalDrops || 0}</span>
+              <span>${drops}</span>
             </div>
             <div class="stat">
               <i class="fas fa-clock"></i>
-              <span>${account.farmingHours?.toFixed(1) || 0}h</span>
+              <span>${farmingHours}h</span>
             </div>
           </div>
         </div>
-        <div class="actions-column">
+        <div class="col-actions">
           <div class="account-actions">
             <button class="action-btn ${account.status === 'offline' ? 'start' : 'stop'}" 
                     data-action="toggle" data-id="${account.id}">
@@ -518,7 +384,52 @@ class SteamManager {
     `;
   }
   
-  // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
+  getAvatarStyle(country) {
+    const colors = {
+      'ru': 'linear-gradient(135deg, #0052B4, #D52B1E)',
+      'us': 'linear-gradient(135deg, #3C3B6E, #B22234)',
+      'de': 'linear-gradient(135deg, #000000, #DD0000, #FFCC00)',
+      'fr': 'linear-gradient(135deg, #002654, #ED2939)',
+      'eu': 'linear-gradient(135deg, #003399, #FFCC00)',
+      'auto': 'linear-gradient(135deg, #666, #999)'
+    };
+    return `background: ${colors[country] || colors.auto}`;
+  }
+  
+  getStatusText(status) {
+    const texts = {
+      'online': 'Online',
+      'farming': 'Фарминг',
+      'offline': 'Offline',
+      'trading': 'Торговля',
+      'error': 'Ошибка'
+    };
+    return texts[status] || status;
+  }
+  
+  getGameIcon(game) {
+    const icons = {
+      'CS2': 'fa-crosshairs',
+      'CS:GO': 'fa-crosshairs',
+      'Dota 2': 'fa-dragon',
+      'Team Fortress 2': 'fa-hat-cowboy',
+      'TF2': 'fa-hat-cowboy'
+    };
+    return icons[game] || 'fa-gamepad';
+  }
+  
+  getEmptyStateHTML() {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-user-plus fa-3x"></i>
+        <h3>Нет добавленных аккаунтов</h3>
+        <p>Добавьте свой первый аккаунт Steam для начала работы</p>
+        <button class="btn btn-primary" id="add-first-account">
+          <i class="fas fa-plus"></i> Добавить первый аккаунт
+        </button>
+      </div>
+    `;
+  }
   
   getFilteredAccounts() {
     const status = document.getElementById('status-filter')?.value || 'all';
@@ -547,8 +458,14 @@ class SteamManager {
     
     this.updateElement('current-page', currentPage);
     this.updateElement('total-pages', totalPages);
-    this.updateElement('prev-page').disabled = currentPage === 1;
-    this.updateElement('next-page').disabled = currentPage === totalPages;
+    
+    const prevBtn = this.updateElement('prev-page');
+    const nextBtn = this.updateElement('next-page');
+    
+    if (prevBtn) prevBtn.disabled = currentPage === 1;
+    if (nextBtn) nextBtn.disabled = currentPage === totalPages;
+    
+    this.updateElement('filtered-count', filtered.length);
   }
   
   updateElement(id, text) {
@@ -558,6 +475,16 @@ class SteamManager {
       return el;
     }
     return null;
+  }
+  
+  updateSystemStatus() {
+    if (socket && socket.connected) {
+      this.updateElement('network-status', 'Стабильная');
+      this.updateElement('system-status').textContent = 'Активна';
+    } else {
+      this.updateElement('network-status', 'Нет соединения');
+      this.updateElement('system-status').textContent = 'Оффлайн';
+    }
   }
   
   // ===== СОБЫТИЯ =====
@@ -575,8 +502,8 @@ class SteamManager {
     // Модальные окна
     this.setupModalListeners();
     
-    // Настройки и безопасность
-    this.setupSettingsListeners();
+    // Общие обработчики
+    this.setupGeneralListeners();
   }
   
   setupButtonListeners() {
@@ -597,6 +524,16 @@ class SteamManager {
     // Импорт/экспорт
     document.getElementById('import-accounts')?.addEventListener('click', () => this.importAccounts());
     document.getElementById('export-accounts')?.addEventListener('click', () => this.exportAccounts());
+    
+    // Обновление
+    document.getElementById('refresh-list')?.addEventListener('click', () => this.loadAccounts());
+    
+    // Дропы
+    document.getElementById('check-drops')?.addEventListener('click', () => this.checkAllDrops());
+    
+    // Логи
+    document.getElementById('clear-logs')?.addEventListener('click', () => this.clearLogs());
+    document.getElementById('pause-logs')?.addEventListener('click', () => this.toggleLogsPause());
   }
   
   setupFilterListeners() {
@@ -622,58 +559,317 @@ class SteamManager {
     }
   }
   
-  // ... остальные методы setup
-  
-  // ===== МАССОВЫЕ ОПЕРАЦИИ =====
-  
-  async startSelected() {
-    if (selectedAccounts.size === 0) {
-      this.showNotification('Выберите аккаунты', 'warning');
-      return;
-    }
-    
-    let started = 0;
-    for (const accountId of selectedAccounts) {
-      const account = accounts.find(a => a.id === accountId);
-      if (account && account.status === 'offline') {
-        await this.toggleAccountStatus(accountId);
-        started++;
-        await this.delay(1000); // Задержка 1 секунда между запусками
+  setupPaginationListeners() {
+    document.getElementById('prev-page')?.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        this.renderAccounts();
+        this.updatePagination();
       }
-    }
+    });
     
-    this.showNotification(`Запущено ${started} аккаунтов`, 'success');
+    document.getElementById('next-page')?.addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        this.renderAccounts();
+        this.updatePagination();
+      }
+    });
+    
+    document.getElementById('page-size')?.addEventListener('change', (e) => {
+      pageSize = parseInt(e.target.value);
+      currentPage = 1;
+      this.renderAccounts();
+      this.updatePagination();
+    });
   }
   
-  async claimAllDrops() {
-    const accountsWithDrops = accounts.filter(a => a.hasNewDrop && a.status !== 'offline');
-    if (accountsWithDrops.length === 0) {
-      this.showNotification('Нет доступных дропов', 'info');
-      return;
-    }
+  setupModalListeners() {
+    // Закрытие модальных окон
+    document.querySelectorAll('.close-modal').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.target.closest('.modal').classList.remove('active');
+      });
+    });
     
-    let collected = 0;
-    for (const account of accountsWithDrops) {
-      const drop = await this.claimDrop(account.id, 'most_expensive');
-      if (drop) collected++;
-      await this.delay(500);
-    }
+    // Клик вне модального окна
+    document.querySelectorAll('.modal').forEach(modal => {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.classList.remove('active');
+        }
+      });
+    });
     
-    this.showNotification(`Собрано ${collected} дропов`, 'success');
+    // Табы в модальных окнах
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const tab = e.target.dataset.tab || e.target.closest('.tab-btn').dataset.tab;
+        const modal = e.target.closest('.modal');
+        
+        // Скрыть все табы
+        modal.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
+        });
+        
+        // Убрать активный класс со всех кнопок
+        modal.querySelectorAll('.tab-btn').forEach(tabBtn => {
+          tabBtn.classList.remove('active');
+        });
+        
+        // Показать выбранный таб
+        modal.querySelector(`#tab-${tab}`)?.classList.add('active');
+        e.target.classList.add('active');
+      });
+    });
+    
+    // Сохранение аккаунта
+    document.getElementById('save-account')?.addEventListener('click', () => this.saveNewAccount());
+    
+    // Массовые действия
+    document.getElementById('execute-bulk-action')?.addEventListener('click', () => this.executeBulkAction());
+    
+    // Карточки массовых действий
+    document.querySelectorAll('.bulk-action-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        const action = e.currentTarget.dataset.action;
+        this.selectBulkAction(action);
+      });
+    });
+  }
+  
+  setupGeneralListeners() {
+    // Обработчик выбора аккаунтов
+    document.addEventListener('change', (e) => {
+      if (e.target.classList.contains('account-checkbox')) {
+        const accountId = e.target.dataset.id;
+        if (e.target.checked) {
+          selectedAccounts.add(accountId);
+        } else {
+          selectedAccounts.delete(accountId);
+        }
+        
+        // Обновляем класс selected для карточки
+        const card = e.target.closest('.account-card');
+        if (card) {
+          card.classList.toggle('selected', e.target.checked);
+        }
+      }
+      
+      // Выбор всех аккаунтов
+      if (e.target.id === 'select-all-checkbox') {
+        const checkboxes = document.querySelectorAll('.account-checkbox');
+        checkboxes.forEach(checkbox => {
+          checkbox.checked = e.target.checked;
+          const accountId = checkbox.dataset.id;
+          if (e.target.checked) {
+            selectedAccounts.add(accountId);
+          } else {
+            selectedAccounts.delete(accountId);
+          }
+        });
+        
+        // Обновляем класс selected для всех карточек
+        document.querySelectorAll('.account-card').forEach(card => {
+          card.classList.toggle('selected', e.target.checked);
+        });
+      }
+    });
+    
+    // Обработчик действий аккаунта
+    document.addEventListener('click', (e) => {
+      const actionBtn = e.target.closest('.action-btn');
+      if (actionBtn) {
+        const action = actionBtn.dataset.action;
+        const accountId = actionBtn.dataset.id;
+        
+        switch(action) {
+          case 'toggle':
+            this.toggleAccountStatus(accountId);
+            break;
+          case 'farm':
+            this.showFarmingModal(accountId);
+            break;
+          case 'claim-drop':
+            this.showDropSelectionModal(accountId);
+            break;
+          case 'market':
+            this.showMarketModal(accountId);
+            break;
+          case 'settings':
+            this.showAccountSettingsModal(accountId);
+            break;
+        }
+      }
+    });
+  }
+  
+  attachAccountEventHandlers() {
+    // Обработчики уже подключены через делегирование в setupGeneralListeners
   }
   
   // ===== МОДАЛЬНЫЕ ОКНА =====
   
   showAddAccountModal() {
-    // Показать модальное окно добавления аккаунта
     document.getElementById('add-account-modal').classList.add('active');
+  }
+  
+  async saveNewAccount() {
+    const modal = document.getElementById('add-account-modal');
+    const activeTab = modal.querySelector('.tab-content.active').id;
+    
+    let accountData = {
+      login: document.getElementById('steam-login').value,
+      password: document.getElementById('steam-password').value,
+      sharedSecret: document.getElementById('steam-shared-secret').value,
+      name: document.getElementById('account-name').value || undefined,
+      country: document.getElementById('account-country').value,
+      game: document.getElementById('farming-game').value,
+      isolation: modal.querySelector('input[name="isolation"]:checked')?.value || 'high',
+      autoFarm: document.getElementById('auto-farm').checked,
+      autoTrade: document.getElementById('enable-trading').checked,
+      priceThreshold: 0.1
+    };
+    
+    // Обработка множественного добавления
+    if (activeTab === 'tab-multiple') {
+      const accountsText = document.getElementById('multiple-accounts').value;
+      const lines = accountsText.split('\n').filter(line => line.trim());
+      
+      for (const line of lines) {
+        const [login, password, name] = line.split(':');
+        if (login && password) {
+          await this.addAccount({
+            ...accountData,
+            login: login.trim(),
+            password: password.trim(),
+            name: (name || login).trim()
+          });
+          
+          // Задержка между добавлением
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    } else {
+      await this.addAccount(accountData);
+    }
+    
+    modal.classList.remove('active');
+    this.resetAddAccountForm();
+  }
+  
+  resetAddAccountForm() {
+    document.getElementById('account-name').value = '';
+    document.getElementById('steam-login').value = '';
+    document.getElementById('steam-password').value = '';
+    document.getElementById('steam-shared-secret').value = '';
+    document.getElementById('multiple-accounts').value = '';
+  }
+  
+  showFarmingModal(accountId) {
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) return;
+    
+    const modal = this.createModal(`
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-seedling"></i> Начать фарминг</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="farm-game-select"><i class="fas fa-gamepad"></i> Выберите игру</label>
+            <select id="farm-game-select" class="form-control">
+              <option value="CS2" ${account.game === 'CS2' ? 'selected' : ''}>CS2</option>
+              <option value="CS:GO" ${account.game === 'CS:GO' ? 'selected' : ''}>CS:GO</option>
+              <option value="Dota 2" ${account.game === 'Dota 2' ? 'selected' : ''}>Dota 2</option>
+              <option value="TF2" ${account.game === 'TF2' ? 'selected' : ''}>Team Fortress 2</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="farm-hours"><i class="fas fa-clock"></i> Время фарминга (часы)</label>
+            <input type="number" id="farm-hours" class="form-control" min="1" max="24" value="4">
+          </div>
+          <div class="form-group">
+            <label><i class="fas fa-shield-alt"></i> Настройки безопасности</label>
+            <div class="checkbox-group">
+              <label>
+                <input type="checkbox" id="farm-safety" checked>
+                <span>Включить эмуляцию человека</span>
+              </label>
+              <label>
+                <input type="checkbox" id="farm-random-breaks" checked>
+                <span>Случайные перерывы</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary close-modal">Отмена</button>
+          <button class="btn btn-success" id="start-farming-btn" data-account-id="${accountId}">
+            <i class="fas fa-play"></i> Начать фарминг
+          </button>
+        </div>
+      </div>
+    `);
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('#start-farming-btn').addEventListener('click', () => {
+      const game = modal.querySelector('#farm-game-select').value;
+      this.startFarming(accountId, game);
+      modal.remove();
+    });
+  }
+  
+  showDropSelectionModal(accountId) {
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) return;
+    
+    currentDropAccountId = accountId;
+    
+    document.getElementById('drop-account-name').textContent = account.name;
+    document.getElementById('drop-selection-modal').classList.add('active');
+    
+    // Загрузка доступных дропов
+    this.loadAvailableDrops(accountId);
+  }
+  
+  async loadAvailableDrops(accountId) {
+    try {
+      const response = await fetch(`${CONFIG.API_URL}/accounts/${accountId}/inventory`);
+      if (response.ok) {
+        const inventory = await response.json();
+        const dropsGrid = document.querySelector('.drops-grid');
+        
+        if (inventory.length === 0) {
+          dropsGrid.innerHTML = '<div class="empty-state">Нет доступных дропов</div>';
+          return;
+        }
+        
+        dropsGrid.innerHTML = inventory.map(item => `
+          <div class="drop-item" data-item-id="${item.id}">
+            <i class="fas fa-box-open"></i>
+            <div class="drop-rarity ${item.rarity}"></div>
+            <h5>${item.name}</h5>
+            <div class="drop-price">$${item.price.toFixed(2)}</div>
+          </div>
+        `).join('');
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки дропов:', error);
+    }
   }
   
   showMarketModal(accountId) {
     const account = accounts.find(a => a.id === accountId);
     if (!account) return;
     
-    // Создание модального окна торговой площадки
+    const modal = this.createMarketModal(account);
+    document.body.appendChild(modal);
+  }
+  
+  createMarketModal(account) {
     const modal = document.createElement('div');
     modal.className = 'modal active';
     modal.innerHTML = `
@@ -684,26 +880,82 @@ class SteamManager {
         </div>
         <div class="modal-body">
           <div class="market-tabs">
-            <button class="tab-btn active" data-tab="inventory">Инвентарь</button>
-            <button class="tab-btn" data-tab="sell">Продать</button>
-            <button class="tab-btn" data-tab="buy">Купить</button>
+            <button class="tab-btn active" data-tab="inventory">Инвентарь (${account.inventory?.length || 0})</button>
             <button class="tab-btn" data-tab="listings">Мои продажи</button>
             <button class="tab-btn" data-tab="stats">Статистика</button>
           </div>
           <div class="tab-content active" id="market-inventory">
             ${this.getInventoryHTML(account)}
           </div>
+          <div class="tab-content" id="market-listings">
+            <div class="empty-state">
+              <i class="fas fa-receipt fa-3x"></i>
+              <p>Нет активных продаж</p>
+            </div>
+          </div>
+          <div class="tab-content" id="market-stats">
+            <div class="stats-grid">
+              <div class="stat-card blue">
+                <i class="fas fa-dollar-sign"></i>
+                <div>
+                  <h3>Общая прибыль</h3>
+                  <p class="stat-value">$${account.totalProfit?.toFixed(2) || '0.00'}</p>
+                </div>
+              </div>
+              <div class="stat-card green">
+                <i class="fas fa-gift"></i>
+                <div>
+                  <h3>Всего дропов</h3>
+                  <p class="stat-value">${account.totalDrops || 0}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     `;
     
-    document.body.appendChild(modal);
-    this.setupMarketModalListeners(modal, account);
+    // Обработчики табов
+    modal.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const tab = e.target.dataset.tab;
+        
+        // Скрыть все табы
+        modal.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
+        });
+        
+        // Убрать активный класс со всех кнопок
+        modal.querySelectorAll('.tab-btn').forEach(tabBtn => {
+          tabBtn.classList.remove('active');
+        });
+        
+        // Показать выбранный таб
+        modal.querySelector(`#market-${tab}`)?.classList.add('active');
+        e.target.classList.add('active');
+      });
+    });
+    
+    // Обработчики кнопок продажи
+    modal.addEventListener('click', (e) => {
+      if (e.target.classList.contains('sell-btn') || e.target.closest('.sell-btn')) {
+        const itemId = e.target.dataset.itemId || e.target.closest('.sell-btn').dataset.itemId;
+        this.showSellItemModal(account.id, itemId);
+      }
+    });
+    
+    return modal;
   }
   
   getInventoryHTML(account) {
     if (!account.inventory || account.inventory.length === 0) {
-      return `<div class="empty-inventory">Инвентарь пуст</div>`;
+      return `
+        <div class="empty-inventory">
+          <i class="fas fa-box-open fa-3x"></i>
+          <p>Инвентарь пуст</p>
+          <p class="small">Дропы появятся во время фарминга</p>
+        </div>
+      `;
     }
     
     return `
@@ -714,8 +966,7 @@ class SteamManager {
             <i class="fas fa-box-open"></i>
             <div class="item-name">${item.name}</div>
             <div class="item-price">$${item.price?.toFixed(2) || '0.00'}</div>
-            <button class="btn btn-small btn-success sell-btn" 
-                    data-item-id="${item.id}">
+            <button class="btn btn-small btn-success sell-btn" data-item-id="${item.id}">
               <i class="fas fa-dollar-sign"></i> Продать
             </button>
           </div>
@@ -724,7 +975,368 @@ class SteamManager {
     `;
   }
   
-  // ===== УВЕДОМЛЕНИЯ И ЛОГИ =====
+  showSellItemModal(accountId, itemId) {
+    const account = accounts.find(a => a.id === accountId);
+    const item = account?.inventory?.find(i => i.id === itemId);
+    
+    if (!account || !item) return;
+    
+    const modal = this.createModal(`
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-dollar-sign"></i> Продать предмет</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="item-preview">
+            <div class="item-icon">
+              <i class="fas fa-box-open fa-2x"></i>
+            </div>
+            <div class="item-details">
+              <h4>${item.name}</h4>
+              <p class="item-rarity ${item.rarity}">${this.getRarityText(item.rarity)}</p>
+              <p class="item-description">Текущая цена: <strong>$${item.price.toFixed(2)}</strong></p>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="sell-price"><i class="fas fa-tag"></i> Цена продажи ($)</label>
+            <input type="number" id="sell-price" class="form-control" 
+                   min="${(item.price * 0.9).toFixed(2)}" 
+                   max="${(item.price * 2).toFixed(2)}" 
+                   step="0.01" 
+                   value="${item.price.toFixed(2)}">
+            <small>Рекомендуемая цена: $${item.price.toFixed(2)}</small>
+          </div>
+          
+          <div class="form-group">
+            <label><i class="fas fa-cog"></i> Настройки продажи</label>
+            <div class="checkbox-group">
+              <label>
+                <input type="checkbox" id="auto-price" checked>
+                <span>Авто-обновление цены</span>
+              </label>
+              <label>
+                <input type="checkbox" id="instant-sell" checked>
+                <span>Продать моментально (скидка 5%)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary close-modal">Отмена</button>
+          <button class="btn btn-success" id="confirm-sell-btn" 
+                  data-account-id="${accountId}" 
+                  data-item-id="${itemId}">
+            <i class="fas fa-check"></i> Выставить на продажу
+          </button>
+        </div>
+      </div>
+    `);
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('#confirm-sell-btn').addEventListener('click', async () => {
+      const price = parseFloat(modal.querySelector('#sell-price').value);
+      
+      if (price <= 0) {
+        this.showNotification('Цена должна быть больше 0', 'error');
+        return;
+      }
+      
+      const listing = await this.listItemOnMarket(accountId, itemId, price);
+      if (listing) {
+        this.showNotification(`Предмет выставлен за $${price}`, 'success');
+        modal.remove();
+        this.loadAccounts(); // Обновляем данные
+      }
+    });
+  }
+  
+  getRarityText(rarity) {
+    const texts = {
+      'common': 'Обычный',
+      'uncommon': 'Необычный',
+      'rare': 'Редкий',
+      'epic': 'Эпический',
+      'legendary': 'Легендарный',
+      'covert': 'Секретный',
+      'extraordinary': 'Экстраординарный',
+      'arcana': 'Аркана',
+      'immortal': 'Бессмертный'
+    };
+    return texts[rarity] || rarity;
+  }
+  
+  createModal(contentHTML) {
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.innerHTML = contentHTML;
+    
+    // Добавляем обработчик закрытия
+    modal.querySelector('.close-modal')?.addEventListener('click', () => {
+      modal.remove();
+    });
+    
+    // Закрытие по клику вне окна
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+    
+    return modal;
+  }
+  
+  // ===== МАССОВЫЕ ДЕЙСТВИЯ =====
+  
+  selectAllVisible() {
+    const visibleAccountIds = this.getFilteredAccounts().map(a => a.id);
+    const allCheckboxes = document.querySelectorAll('.account-checkbox');
+    
+    if (visibleAccountIds.length === selectedAccounts.size && 
+        visibleAccountIds.every(id => selectedAccounts.has(id))) {
+      // Если все уже выбраны - снимаем выделение
+      selectedAccounts.clear();
+      allCheckboxes.forEach(cb => cb.checked = false);
+      document.querySelectorAll('.account-card').forEach(card => {
+        card.classList.remove('selected');
+      });
+    } else {
+      // Выбираем все видимые
+      visibleAccountIds.forEach(id => selectedAccounts.add(id));
+      allCheckboxes.forEach(cb => {
+        cb.checked = selectedAccounts.has(cb.dataset.id);
+      });
+      document.querySelectorAll('.account-card').forEach(card => {
+        const accountId = card.dataset.id;
+        card.classList.toggle('selected', selectedAccounts.has(accountId));
+      });
+    }
+  }
+  
+  async startSelected() {
+    if (selectedAccounts.size === 0) {
+      this.showNotification('Выберите аккаунты', 'warning');
+      return;
+    }
+    
+    const results = await this.bulkAction('start', Array.from(selectedAccounts));
+    this.showNotification(`Запущено ${results.filter(r => r.success).length} аккаунтов`, 'success');
+  }
+  
+  async stopSelected() {
+    if (selectedAccounts.size === 0) {
+      this.showNotification('Выберите аккаунты', 'warning');
+      return;
+    }
+    
+    const results = await this.bulkAction('stop', Array.from(selectedAccounts));
+    this.showNotification(`Остановлено ${results.filter(r => r.success).length} аккаунтов`, 'success');
+  }
+  
+  async startAllFarming() {
+    const onlineAccounts = accounts.filter(a => a.status !== 'offline').map(a => a.id);
+    
+    if (onlineAccounts.length === 0) {
+      this.showNotification('Нет онлайн аккаунтов', 'warning');
+      return;
+    }
+    
+    const results = await this.bulkAction('farm', onlineAccounts, { game: 'CS2' });
+    this.showNotification(`Фарминг запущен на ${results.filter(r => r.success).length} аккаунтах`, 'success');
+  }
+  
+  async claimAllDrops() {
+    const accountsWithDrops = accounts.filter(a => a.hasNewDrop && a.status !== 'offline').map(a => a.id);
+    
+    if (accountsWithDrops.length === 0) {
+      this.showNotification('Нет доступных дропов', 'info');
+      return;
+    }
+    
+    const results = await this.bulkAction('claim-drops', accountsWithDrops, { strategy: 'most_expensive' });
+    this.showNotification(`Собрано ${results.length} дропов`, 'success');
+  }
+  
+  async stopAllAccounts() {
+    const activeAccounts = accounts.filter(a => a.status !== 'offline').map(a => a.id);
+    
+    if (activeAccounts.length === 0) {
+      this.showNotification('Нет активных аккаунтов', 'info');
+      return;
+    }
+    
+    const results = await this.bulkAction('stop', activeAccounts);
+    this.showNotification(`Остановлено ${results.filter(r => r.success).length} аккаунтов`, 'success');
+  }
+  
+  selectBulkAction(action) {
+    // Подсветка выбранного действия
+    document.querySelectorAll('.bulk-action-card').forEach(card => {
+      card.classList.toggle('selected', card.dataset.action === action);
+    });
+    
+    // Обновление информации о выбранном действии
+    switch(action) {
+      case 'claim-all-drops':
+        const availableDrops = accounts.filter(a => a.hasNewDrop).length;
+        this.updateElement('available-drops-count', availableDrops);
+        break;
+        
+      case 'start-all-farming':
+        const canFarm = accounts.filter(a => a.status !== 'offline' && !a.farming).length;
+        this.updateElement('can-farm-count', canFarm);
+        break;
+        
+      case 'stop-all-accounts':
+        const active = accounts.filter(a => a.status !== 'offline').length;
+        this.updateElement('active-accounts-count', active);
+        break;
+        
+      case 'rotate-proxies':
+        const usingProxy = accounts.filter(a => a.proxy).length;
+        this.updateElement('proxy-users-count', usingProxy);
+        break;
+    }
+  }
+  
+  async executeBulkAction() {
+    const selectedCard = document.querySelector('.bulk-action-card.selected');
+    if (!selectedCard) {
+      this.showNotification('Выберите действие', 'warning');
+      return;
+    }
+    
+    const action = selectedCard.dataset.action;
+    let accountIds = [];
+    
+    // Получаем выбранные аккаунты в зависимости от настроек
+    const filter = document.getElementById('bulk-accounts-select')?.value || 'all';
+    
+    switch(filter) {
+      case 'all':
+        accountIds = accounts.map(a => a.id);
+        break;
+      case 'online':
+        accountIds = accounts.filter(a => a.status !== 'offline').map(a => a.id);
+        break;
+      case 'offline':
+        accountIds = accounts.filter(a => a.status === 'offline').map(a => a.id);
+        break;
+      case 'farming':
+        accountIds = accounts.filter(a => a.farming).map(a => a.id);
+        break;
+    }
+    
+    if (accountIds.length === 0) {
+      this.showNotification('Нет подходящих аккаунтов', 'warning');
+      return;
+    }
+    
+    // Закрываем модальное окно
+    document.getElementById('bulk-actions-modal').classList.remove('active');
+    
+    // Выполняем действие
+    switch(action) {
+      case 'claim-all-drops':
+        await this.claimAllDrops();
+        break;
+        
+      case 'start-all-farming':
+        await this.startAllFarming();
+        break;
+        
+      case 'stop-all-accounts':
+        await this.stopAllAccounts();
+        break;
+        
+      case 'rotate-proxies':
+        this.showNotification('Смена прокси в разработке', 'info');
+        break;
+        
+      case 'check-steam-guard':
+        this.showNotification('Проверка Steam Guard в разработке', 'info');
+        break;
+        
+      case 'export-logs':
+        this.exportLogs();
+        break;
+    }
+  }
+  
+  // ===== ИМПОРТ/ЭКСПОРТ =====
+  
+  importAccounts() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.txt';
+    
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        if (Array.isArray(data.accounts)) {
+          let imported = 0;
+          for (const accountData of data.accounts) {
+            await this.addAccount(accountData);
+            imported++;
+          }
+          this.showNotification(`Импортировано ${imported} аккаунтов`, 'success');
+        }
+      } catch (error) {
+        this.showNotification('Ошибка импорта файла', 'error');
+      }
+    };
+    
+    input.click();
+  }
+  
+  exportAccounts() {
+    const data = {
+      version: CONFIG.VERSION,
+      exportDate: new Date().toISOString(),
+      accounts: accounts.map(account => ({
+        id: account.id,
+        name: account.name,
+        login: account.login,
+        status: account.status,
+        game: account.game,
+        totalProfit: account.totalProfit,
+        totalDrops: account.totalDrops,
+        settings: account.settings
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `steam-accounts-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    this.showNotification('Аккаунты экспортированы', 'success');
+  }
+  
+  exportLogs() {
+    const logData = logs.map(log => `[${log.time}] [${log.type.toUpperCase()}] ${log.message}`).join('\n');
+    const blob = new Blob([logData], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `steam-logs-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    this.showNotification('Логи экспортированы', 'success');
+  }
+  
+  // ===== ЛОГИ =====
   
   addLog(message, type = 'info') {
     const timestamp = new Date().toLocaleTimeString();
@@ -737,6 +1349,37 @@ class SteamManager {
       this.updateLogs();
     }
   }
+  
+  updateLogs() {
+    const container = document.getElementById('system-logs');
+    if (!container) return;
+    
+    container.innerHTML = logs.map(log => `
+      <div class="log-entry ${log.type}">
+        <span class="log-time">[${log.time}]</span>
+        <span class="log-message">${log.message}</span>
+      </div>
+    `).join('');
+  }
+  
+  clearLogs() {
+    logs = [];
+    this.updateLogs();
+    this.showNotification('Логи очищены', 'info');
+  }
+  
+  toggleLogsPause() {
+    isLogsPaused = !isLogsPaused;
+    const btn = document.getElementById('pause-logs');
+    if (btn) {
+      btn.innerHTML = isLogsPaused ? 
+        '<i class="fas fa-play"></i> Продолжить' : 
+        '<i class="fas fa-pause"></i> Пауза';
+    }
+    this.showNotification(isLogsPaused ? 'Логи на паузе' : 'Логи продолжаются', 'info');
+  }
+  
+  // ===== УВЕДОМЛЕНИЯ =====
   
   showNotification(message, type = 'info', duration = 5000) {
     const container = document.getElementById('notifications');
@@ -752,101 +1395,22 @@ class SteamManager {
     
     container.appendChild(notification);
     
-    // Анимация
+    // Анимация появления
     setTimeout(() => notification.classList.add('show'), 10);
+    
+    // Обработчик закрытия
+    notification.querySelector('.notification-close').addEventListener('click', () => {
+      notification.classList.remove('show');
+      setTimeout(() => notification.remove(), 300);
+    });
     
     // Автоудаление
     setTimeout(() => {
-      notification.classList.remove('show');
-      setTimeout(() => notification.remove(), 300);
-    }, duration);
-  }
-  
-  // ===== СИСТЕМНЫЕ МЕТОДЫ =====
-  
-  startAutoUpdates() {
-    // Обновление времени работы
-    setInterval(() => {
-      accounts.forEach(account => {
-        if (account.status !== 'offline') {
-          // Обновляем время работы
-          const timeMatch = account.uptime?.match(/(\d+)ч\s*(\d+)м/);
-          if (timeMatch) {
-            let hours = parseInt(timeMatch[1]);
-            let minutes = parseInt(timeMatch[2]) + 1;
-            
-            if (minutes >= 60) {
-              hours++;
-              minutes = 0;
-            }
-            
-            account.uptime = `${hours}ч ${minutes}м`;
-          }
-          
-          // Обновляем часы фарминга
-          if (account.farming) {
-            account.farmingHours = (account.farmingHours || 0) + (1/60);
-          }
-        }
-      });
-      
-      this.updateAll();
-      this.saveToStorage();
-      
-      // Случайные события
-      if (Math.random() > 0.8) {
-        const randomAccount = accounts[Math.floor(Math.random() * accounts.length)];
-        if (randomAccount?.status === 'farming' && Math.random() > 0.7) {
-          randomAccount.hasNewDrop = true;
-          this.addLog(`Новый дроп доступен: ${randomAccount.name}`, 'info');
-          this.updateAll();
-        }
+      if (notification.parentNode) {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
       }
-    }, 60000); // Каждую минуту
-    
-    // Автосохранение
-    setInterval(() => {
-      this.saveToStorage();
-      this.saveToServer();
-    }, CONFIG.AUTO_SAVE_INTERVAL);
-  }
-  
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-  
-  // ===== УТИЛИТЫ =====
-  
-  getCountryColor(country) {
-    const colors = {
-      'ru': 'linear-gradient(135deg, #0052B4, #D52B1E)',
-      'us': 'linear-gradient(135deg, #3C3B6E, #B22234)',
-      'de': 'linear-gradient(135deg, #000000, #DD0000, #FFCC00)',
-      'fr': 'linear-gradient(135deg, #002654, #ED2939)',
-      'nl': 'linear-gradient(135deg, #AE1C28, #21468B)'
-    };
-    return colors[country] || 'linear-gradient(135deg, #666, #999)';
-  }
-  
-  getStatusText(status) {
-    const texts = {
-      'online': 'Online',
-      'farming': 'Фарминг',
-      'offline': 'Offline',
-      'trading': 'Торговля',
-      'error': 'Ошибка'
-    };
-    return texts[status] || 'Offline';
-  }
-  
-  getGameIcon(game) {
-    const icons = {
-      'CS2': 'fa-crosshairs',
-      'CS:GO': 'fa-crosshairs',
-      'Dota 2': 'fa-dragon',
-      'Team Fortress 2': 'fa-hat-cowboy'
-    };
-    return icons[game] || 'fa-gamepad';
+    }, duration);
   }
   
   getNotificationIcon(type) {
@@ -859,73 +1423,159 @@ class SteamManager {
     return icons[type] || 'info-circle';
   }
   
-  getGameDrops(game) {
-    const drops = {
-      'CS2': [
-        { name: "Кейс Prisma 2", price: 0.45, rarity: "rare" },
-        { name: "AK-47 | Redline", price: 15.50, rarity: "covert" },
-        { name: "★ Butterfly Knife", price: 1200.00, rarity: "extraordinary" }
-      ],
-      'Dota 2': [
-        { name: "Arcana | Terrorblade", price: 35.00, rarity: "arcana" },
-        { name: "Immortal Treasure III", price: 3.50, rarity: "immortal" }
-      ]
-    };
-    return drops[game] || drops['CS2'];
-  }
-  
   // ===== ОБРАБОТЧИКИ СОБЫТИЙ СЕРВЕРА =====
   
   handleNewDrop(data) {
     const account = accounts.find(a => a.id === data.accountId);
     if (account) {
-      account.hasNewDrop = true;
-      this.addLog(`Новый дроп на ${account.name}: ${data.drop.name}`, 'info');
       this.showNotification(`Новый дроп на ${account.name}!`, 'info');
-      this.updateAll();
     }
+  }
+  
+  handleDropClaimed(data) {
+    this.showNotification(`Дроп получен! Прибыль: $${data.drop.price}`, 'success');
   }
   
   handleItemSold(data) {
-    const account = accounts.find(a => a.id === data.accountId);
-    if (account) {
-      this.addLog(`Продажа: ${data.item.name} за $${data.listing.price}`, 'success');
-      this.showNotification(`Продано: ${data.item.name}`, 'success');
-      this.updateAll();
+    this.showNotification(`Продано: ${data.item.name} за $${data.price}`, 'success');
+  }
+  
+  checkAllDrops() {
+    const accountsWithDrops = accounts.filter(a => a.hasNewDrop);
+    if (accountsWithDrops.length > 0) {
+      this.showNotification(`Найдено ${accountsWithDrops.length} аккаунтов с дропами`, 'info');
+    } else {
+      this.showNotification('Нет доступных дропов', 'info');
     }
   }
   
-  updateBotStatus(data) {
-    const account = accounts.find(a => a.id === data.accountId);
-    if (account) {
-      Object.assign(account, data.updates);
-      this.updateAll();
-    }
-  }
+  // ===== СИСТЕМНЫЕ МЕТОДЫ =====
   
-  updateSystemStatus() {
-    if (socket && socket.connected) {
-      socket.emit('get-status');
-    }
-  }
-  
-  updateUIStatus(status) {
-    this.updateElement('system-status', status.online ? 'Онлайн' : 'Оффлайн');
-    this.updateElement('bots-active', `${status.botsActive}/${accounts.length}`);
+  startAutoUpdates() {
+    // Обновление статистики каждые 5 секунд
+    updateInterval = setInterval(() => {
+      if (socket && socket.connected) {
+        socket.emit('get-stats');
+      }
+    }, 5000);
     
-    // Обновление использования памяти
-    if (status.memoryUsage) {
-      const usage = (status.memoryUsage.heapUsed / status.memoryUsage.heapTotal * 100).toFixed(1);
-      this.updateElement('memory-usage', `${usage}%`);
-    }
+    // Получение статистики
+    socket.on('stats-update', (stats) => {
+      this.updateElement('bots-active', `${stats.online}/${stats.total}`);
+      this.updateElement('total-profit', `$${stats.totalProfit.toFixed(2)}`);
+    });
   }
   
-  // ===== ЗАВЕРШЕНИЕ =====
+  // ===== ДОПОЛНИТЕЛЬНЫЕ МЕТОДЫ =====
+  
+  showAccountSettingsModal(accountId) {
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) return;
+    
+    const modal = this.createModal(`
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-cog"></i> Настройки аккаунта - ${account.name}</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="acc-name"><i class="fas fa-user"></i> Имя аккаунта</label>
+            <input type="text" id="acc-name" class="form-control" value="${account.name}">
+          </div>
+          
+          <div class="form-group">
+            <label for="acc-game"><i class="fas fa-gamepad"></i> Игра по умолчанию</label>
+            <select id="acc-game" class="form-control">
+              <option value="CS2" ${account.game === 'CS2' ? 'selected' : ''}>CS2</option>
+              <option value="CS:GO" ${account.game === 'CS:GO' ? 'selected' : ''}>CS:GO</option>
+              <option value="Dota 2" ${account.game === 'Dota 2' ? 'selected' : ''}>Dota 2</option>
+              <option value="TF2" ${account.game === 'TF2' ? 'selected' : ''}>Team Fortress 2</option>
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label><i class="fas fa-shield-alt"></i> Настройки безопасности</label>
+            <div class="checkbox-group">
+              <label>
+                <input type="checkbox" id="acc-auto-farm" ${account.settings?.autoFarm ? 'checked' : ''}>
+                <span>Автоматически начинать фарминг</span>
+              </label>
+              <label>
+                <input type="checkbox" id="acc-auto-trade" ${account.settings?.autoTrade ? 'checked' : ''}>
+                <span>Автоматическая торговля</span>
+              </label>
+              <label>
+                <input type="checkbox" id="acc-claim-drops" ${account.settings?.autoClaimDrops ? 'checked' : ''}>
+                <span>Автоматически забирать дропы</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="danger-zone">
+            <h4><i class="fas fa-exclamation-triangle"></i> Опасная зона</h4>
+            <button class="btn btn-danger" id="delete-account-btn" data-account-id="${accountId}">
+              <i class="fas fa-trash"></i> Удалить аккаунт
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary close-modal">Отмена</button>
+          <button class="btn btn-success" id="save-settings-btn" data-account-id="${accountId}">
+            <i class="fas fa-save"></i> Сохранить настройки
+          </button>
+        </div>
+      </div>
+    `);
+    
+    document.body.appendChild(modal);
+    
+    // Обработчик сохранения настроек
+    modal.querySelector('#save-settings-btn').addEventListener('click', async () => {
+      const updates = {
+        name: modal.querySelector('#acc-name').value,
+        game: modal.querySelector('#acc-game').value,
+        settings: {
+          autoFarm: modal.querySelector('#acc-auto-farm').checked,
+          autoTrade: modal.querySelector('#acc-auto-trade').checked,
+          autoClaimDrops: modal.querySelector('#acc-claim-drops').checked
+        }
+      };
+      
+      await fetch(`${CONFIG.API_URL}/accounts/${accountId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      
+      this.showNotification('Настройки сохранены', 'success');
+      this.loadAccounts();
+      modal.remove();
+    });
+    
+    // Обработчик удаления аккаунта
+    modal.querySelector('#delete-account-btn').addEventListener('click', async () => {
+      if (confirm('Вы уверены, что хотите удалить этот аккаунт? Это действие нельзя отменить.')) {
+        await fetch(`${CONFIG.API_URL}/accounts/${accountId}`, {
+          method: 'DELETE'
+        });
+        
+        this.showNotification('Аккаунт удален', 'success');
+        this.loadAccounts();
+        modal.remove();
+      }
+    });
+  }
+  
+  // ===== УТИЛИТЫ =====
+  
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
   
   cleanup() {
     if (updateInterval) clearInterval(updateInterval);
     if (socket) socket.disconnect();
-    this.saveToStorage();
   }
 }
 
@@ -935,7 +1585,7 @@ let steamManager;
 document.addEventListener('DOMContentLoaded', () => {
   steamManager = new SteamManager();
   
-  // Глобальный обработчик уведомлений
+  // Глобальный обработчик уведомлений (делегирование)
   document.addEventListener('click', (e) => {
     if (e.target.closest('.notification-close')) {
       const notification = e.target.closest('.notification');
@@ -950,7 +1600,20 @@ document.addEventListener('DOMContentLoaded', () => {
       steamManager.cleanup();
     }
   });
+  
+  // Открытие модального окна массовых действий
+  document.getElementById('bulk-actions-btn')?.addEventListener('click', () => {
+    document.getElementById('bulk-actions-modal').classList.add('active');
+  });
+  
+  // Кнопка показа пароля
+  document.getElementById('show-password-btn')?.addEventListener('click', (e) => {
+    const passwordInput = document.getElementById('steam-password');
+    const type = passwordInput.type === 'password' ? 'text' : 'password';
+    passwordInput.type = type;
+    e.target.innerHTML = type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+  });
 });
 
-// Глобальные функции для HTML
+// Экспортируем для глобального доступа
 window.steamManager = steamManager;
