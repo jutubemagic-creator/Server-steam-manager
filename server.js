@@ -1,16 +1,10 @@
-// =============== STEAM MANAGER PRO - MAIN SERVER ===============
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const path = require('path');
 const fs = require('fs');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 
 const app = express();
@@ -23,818 +17,660 @@ const io = socketIO(server, {
 });
 
 // Middleware
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
-}));
-app.use(compression());
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use('/api/', limiter);
+// ================== БАЗА ДАННЫХ ==================
+const DB_FILE = 'data.json';
 
-// Безопасность
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
-
-// ================== DATABASE ==================
-const accountsDB = path.join(__dirname, 'database', 'accounts.json');
-const sessionsDB = path.join(__dirname, 'database', 'sessions.json');
-const settingsDB = path.join(__dirname, 'database', 'settings.json');
-
-// Создаем директории и файлы БД если их нет
 function initDatabase() {
-  const dirs = ['database', 'logs', 'cache'];
-  dirs.forEach(dir => {
-    if (!fs.existsSync(path.join(__dirname, dir))) {
-      fs.mkdirSync(path.join(__dirname, dir), { recursive: true });
-    }
-  });
-
-  const dbs = [
-    { file: accountsDB, default: [] },
-    { file: sessionsDB, default: {} },
-    { file: settingsDB, default: {} }
-  ];
-
-  dbs.forEach(db => {
-    if (!fs.existsSync(db.file)) {
-      fs.writeFileSync(db.file, JSON.stringify(db.default, null, 2));
-    }
-  });
+  if (!fs.existsSync(DB_FILE)) {
+    const initialData = {
+      accounts: [],
+      settings: {
+        version: '2.0.0',
+        autoSave: true,
+        proxyRotation: true
+      },
+      logs: []
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
+  }
 }
 
-initDatabase();
-
-// ================== HELPER FUNCTIONS ==================
-function readJSON(file) {
+function readDatabase() {
   try {
-    const data = fs.readFileSync(file, 'utf8');
+    const data = fs.readFileSync(DB_FILE, 'utf8');
     return JSON.parse(data);
   } catch (error) {
-    console.error(`Error reading ${file}:`, error);
-    return null;
+    return { accounts: [], settings: {}, logs: [] };
   }
 }
 
-function writeJSON(file, data) {
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error(`Error writing ${file}:`, error);
-    return false;
-  }
+function writeDatabase(data) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-function logSystem(message, type = 'info') {
-  const timestamp = new Date().toISOString();
-  const logEntry = `[${timestamp}] [${type.toUpperCase()}] ${message}\n`;
+function addLog(message, type = 'info') {
+  const db = readDatabase();
+  db.logs.unshift({
+    id: uuidv4(),
+    message,
+    type,
+    timestamp: new Date().toISOString()
+  });
   
-  fs.appendFileSync(
-    path.join(__dirname, 'logs', 'system.log'),
-    logEntry
-  );
+  // Ограничиваем логи 1000 записями
+  if (db.logs.length > 1000) db.logs.pop();
   
-  console.log(`[${type}] ${message}`);
+  writeDatabase(db);
   
   // Отправляем в WebSocket
   io.emit('system-log', {
     time: new Date().toLocaleTimeString(),
-    message: message,
-    type: type
+    message,
+    type
   });
 }
 
-// ================== DATA MODELS ==================
-class AccountManager {
+initDatabase();
+addLog('Система инициализирована', 'info');
+
+// ================== ЭМУЛЯЦИЯ STEAM ==================
+class SteamEmulator {
   constructor() {
-    this.accounts = new Map();
-    this.loadAccounts();
+    this.activeSessions = new Map();
+    this.farmingJobs = new Map();
   }
 
-  loadAccounts() {
-    const data = readJSON(accountsDB) || [];
-    data.forEach(account => {
-      this.accounts.set(account.id, account);
+  generateHardwareProfile() {
+    const cpus = ['Intel i7-13700K', 'AMD Ryzen 7 5800X', 'Intel i5-12600K', 'AMD Ryzen 5 5600X'];
+    const gpus = ['NVIDIA RTX 4070', 'AMD RX 7800 XT', 'NVIDIA RTX 3060', 'AMD RX 6700 XT'];
+    const rams = ['16GB DDR4', '32GB DDR5', '8GB DDR4', '64GB DDR5'];
+    const oss = ['Windows 11 Pro', 'Windows 10 Home', 'Ubuntu 22.04', 'macOS Ventura'];
+    
+    return {
+      cpu: cpus[Math.floor(Math.random() * cpus.length)],
+      gpu: gpus[Math.floor(Math.random() * gpus.length)],
+      ram: rams[Math.floor(Math.random() * rams.length)],
+      os: oss[Math.floor(Math.random() * oss.length)],
+      screen: `${1920 + Math.floor(Math.random() * 500)}x${1080 + Math.floor(Math.random() * 300)}`,
+      browser: this.generateBrowserFingerprint()
+    };
+  }
+
+  generateBrowserFingerprint() {
+    const browsers = [
+      'Chrome/120.0.0.0',
+      'Firefox/120.0',
+      'Edge/120.0.0.0',
+      'Safari/17.0'
+    ];
+    
+    const os = [
+      'Windows NT 10.0; Win64; x64',
+      'Windows NT 6.1; WOW64',
+      'Macintosh; Intel Mac OS X 10_15_7',
+      'X11; Linux x86_64'
+    ];
+    
+    return `Mozilla/5.0 (${os[Math.floor(Math.random() * os.length)]}) AppleWebKit/537.36 (KHTML, like Gecko) ${browsers[Math.floor(Math.random() * browsers.length)]} Safari/537.36`;
+  }
+
+  generateProxy(country) {
+    const proxies = {
+      'ru': [
+        { ip: '195.24.76.123', port: 8080, city: 'Moscow', type: 'residential' },
+        { ip: '85.234.126.155', port: 3128, city: 'Saint Petersburg', type: 'datacenter' }
+      ],
+      'us': [
+        { ip: '104.18.210.45', port: 8080, city: 'New York', type: 'residential' },
+        { ip: '162.243.128.147', port: 3128, city: 'San Francisco', type: 'datacenter' }
+      ],
+      'de': [
+        { ip: '87.256.45.12', port: 8080, city: 'Frankfurt', type: 'residential' },
+        { ip: '95.217.34.209', port: 3128, city: 'Berlin', type: 'datacenter' }
+      ],
+      'nl': [
+        { ip: '145.239.86.78', port: 8080, city: 'Amsterdam', type: 'residential' },
+        { ip: '185.230.47.66', port: 3128, city: 'Rotterdam', type: 'datacenter' }
+      ]
+    };
+    
+    const countryProxies = proxies[country] || proxies.ru;
+    return countryProxies[Math.floor(Math.random() * countryProxies.length)];
+  }
+
+  generateDrop(game) {
+    const drops = {
+      'CS2': [
+        { id: uuidv4(), name: "CS:GO Weapon Case", price: 0.35, rarity: "common", image: "case.png" },
+        { id: uuidv4(), name: "Operation Phoenix Case", price: 0.85, rarity: "rare", image: "case.png" },
+        { id: uuidv4(), name: "Prisma 2 Case", price: 0.45, rarity: "rare", image: "case.png" },
+        { id: uuidv4(), name: "Fracture Case", price: 0.25, rarity: "common", image: "case.png" },
+        { id: uuidv4(), name: "AK-47 | Redline", price: 15.50, rarity: "covert", image: "ak47.png" },
+        { id: uuidv4(), name: "AWP | Asiimov", price: 45.00, rarity: "covert", image: "awp.png" }
+      ],
+      'Dota 2': [
+        { id: uuidv4(), name: "Treasure of the Crimson Witness", price: 35.00, rarity: "immortal", image: "treasure.png" },
+        { id: uuidv4(), name: "Arcana | Terrorblade", price: 45.00, rarity: "arcana", image: "arcana.png" },
+        { id: uuidv4(), name: "Immortal Treasure I", price: 3.50, rarity: "rare", image: "treasure.png" }
+      ],
+      'TF2': [
+        { id: uuidv4(), name: "Mann Co. Supply Crate Key", price: 2.50, rarity: "common", image: "key.png" },
+        { id: uuidv4(), name: "Unusual Hat", price: 25.00, rarity: "rare", image: "hat.png" }
+      ]
+    };
+    
+    const gameDrops = drops[game] || drops.CS2;
+    return gameDrops[Math.floor(Math.random() * gameDrops.length)];
+  }
+
+  async startAccount(accountId) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const session = {
+          id: uuidv4(),
+          accountId,
+          startedAt: new Date(),
+          hardware: this.generateHardwareProfile(),
+          proxy: this.generateProxy('ru'),
+          status: 'online'
+        };
+        
+        this.activeSessions.set(accountId, session);
+        addLog(`Аккаунт ${accountId} запущен через ${session.proxy.ip}`, 'success');
+        resolve(session);
+      }, 2000);
     });
-    logSystem(`Loaded ${this.accounts.size} accounts`, 'info');
   }
 
-  saveAccounts() {
-    const accountsArray = Array.from(this.accounts.values());
-    writeJSON(accountsDB, accountsArray);
+  async startFarming(accountId, game) {
+    return new Promise((resolve) => {
+      const session = this.activeSessions.get(accountId);
+      if (!session) {
+        throw new Error('Сессия не найдена');
+      }
+      
+      addLog(`Запуск фарминга ${game} для аккаунта ${accountId}`, 'info');
+      
+      // Эмуляция фарминга с дропами
+      const farmingInterval = setInterval(() => {
+        // Шанс дропа 15% каждый час
+        if (Math.random() < 0.15 / 60) {
+          const drop = this.generateDrop(game);
+          
+          io.emit('new-drop', {
+            accountId,
+            drop,
+            timestamp: new Date().toISOString()
+          });
+          
+          addLog(`Новый дроп: ${drop.name} ($${drop.price})`, 'info');
+        }
+      }, 60000); // Проверка каждую минуту
+      
+      this.farmingJobs.set(accountId, farmingInterval);
+      resolve({ success: true, interval: farmingInterval });
+    });
   }
 
-  createAccount(accountData) {
-    const accountId = uuidv4();
-    const encryptedPassword = bcrypt.hashSync(accountData.password, 10);
+  stopFarming(accountId) {
+    const interval = this.farmingJobs.get(accountId);
+    if (interval) {
+      clearInterval(interval);
+      this.farmingJobs.delete(accountId);
+      addLog(`Фарминг остановлен для аккаунта ${accountId}`, 'info');
+    }
+  }
+
+  stopAccount(accountId) {
+    this.stopFarming(accountId);
+    this.activeSessions.delete(accountId);
+    addLog(`Аккаунт ${accountId} остановлен`, 'info');
+  }
+}
+
+const steamEmu = new SteamEmulator();
+
+// ================== API ==================
+
+// Статус сервера
+app.get('/api/status', (req, res) => {
+  const db = readDatabase();
+  res.json({
+    status: 'online',
+    version: '2.0.0',
+    accounts: db.accounts.length,
+    online: steamEmu.activeSessions.size,
+    farming: steamEmu.farmingJobs.size,
+    memory: process.memoryUsage(),
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Все аккаунты
+app.get('/api/accounts', (req, res) => {
+  const db = readDatabase();
+  res.json(db.accounts);
+});
+
+// Создать аккаунт
+app.post('/api/accounts', async (req, res) => {
+  try {
+    const accountData = req.body;
+    const db = readDatabase();
     
     const newAccount = {
-      id: accountId,
-      name: accountData.name || `Аккаунт ${this.accounts.size + 1}`,
-      login: accountData.login,
-      password: encryptedPassword,
+      id: uuidv4(),
+      name: accountData.name || `Аккаунт ${db.accounts.length + 1}`,
+      login: accountData.login || `user${db.accounts.length + 1}`,
+      password: await bcrypt.hash(accountData.password || 'password123', 10),
       sharedSecret: accountData.sharedSecret || null,
       status: 'offline',
-      proxy: accountData.proxy || { country: 'auto', type: 'auto' },
       game: accountData.game || 'CS2',
-      country: accountData.country || 'auto',
-      isolation: accountData.isolation || 'high',
+      country: accountData.country || 'ru',
+      isolation: accountData.isolation || 'maximum',
       farming: false,
       uptime: '0ч 0м',
-      lastDrop: null,
       hasNewDrop: false,
+      lastDrop: null,
       farmingHours: 0,
       totalProfit: 0,
       totalDrops: 0,
       inventory: [],
+      marketListings: [],
       settings: {
         autoFarm: accountData.autoFarm !== false,
         autoTrade: accountData.autoTrade || false,
         priceThreshold: accountData.priceThreshold || 0.1,
         claimStrategy: accountData.claimStrategy || 'most_expensive'
       },
+      hardware: steamEmu.generateHardwareProfile(),
+      proxy: steamEmu.generateProxy(accountData.country || 'ru'),
       createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString(),
-      hardwareFingerprint: this.generateHardwareFingerprint(),
-      security: {
-        lastIP: null,
-        userAgent: null,
-        suspiciousActivity: false,
-        trustScore: 100
-      }
+      lastActivity: new Date().toISOString()
     };
-
-    this.accounts.set(accountId, newAccount);
-    this.saveAccounts();
-    logSystem(`Created account: ${newAccount.name}`, 'success');
     
-    return newAccount;
-  }
-
-  generateHardwareFingerprint() {
-    return {
-      screen: `${Math.floor(Math.random() * 1920)}x${Math.floor(Math.random() * 1080)}`,
-      platform: ['Win32', 'Linux x86_64', 'MacIntel'][Math.floor(Math.random() * 3)],
-      userAgent: this.generateRandomUserAgent(),
-      language: ['ru-RU', 'en-US', 'de-DE'][Math.floor(Math.random() * 3)],
-      timezone: ['Europe/Moscow', 'America/New_York', 'Europe/Berlin'][Math.floor(Math.random() * 3)],
-      canvasFingerprint: uuidv4().replace(/-/g, ''),
-      webglFingerprint: uuidv4().replace(/-/g, ''),
-      audioFingerprint: uuidv4().replace(/-/g, ''),
-      fonts: this.generateRandomFonts()
-    };
-  }
-
-  generateRandomUserAgent() {
-    const agents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    ];
-    return agents[Math.floor(Math.random() * agents.length)];
-  }
-
-  generateRandomFonts() {
-    const fontSets = [
-      ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia'],
-      ['Helvetica', 'Tahoma', 'Trebuchet MS', 'Comic Sans MS', 'Impact'],
-      ['Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Source Sans Pro']
-    ];
-    return fontSets[Math.floor(Math.random() * fontSets.length)];
-  }
-
-  updateAccount(accountId, updates) {
-    if (!this.accounts.has(accountId)) return null;
+    db.accounts.push(newAccount);
+    writeDatabase(db);
     
-    const account = this.accounts.get(accountId);
-    Object.assign(account, updates);
-    account.lastActivity = new Date().toISOString();
+    addLog(`Создан аккаунт: ${newAccount.name}`, 'success');
     
-    this.accounts.set(accountId, account);
-    this.saveAccounts();
-    
-    // Отправляем обновление через WebSocket
-    io.emit('account-updated', { accountId, updates });
-    
-    return account;
-  }
-
-  deleteAccount(accountId) {
-    if (this.accounts.has(accountId)) {
-      const account = this.accounts.get(accountId);
-      this.accounts.delete(accountId);
-      this.saveAccounts();
-      logSystem(`Deleted account: ${account.name}`, 'warning');
-      return true;
-    }
-    return false;
-  }
-
-  getAllAccounts() {
-    return Array.from(this.accounts.values());
-  }
-
-  getAccount(accountId) {
-    return this.accounts.get(accountId);
-  }
-
-  startAccount(accountId) {
-    const account = this.getAccount(accountId);
-    if (!account) return false;
-
-    account.status = 'online';
-    account.farming = false;
-    account.uptime = '0ч 0м';
-    account.lastActivity = new Date().toISOString();
-    
-    this.saveAccounts();
-    logSystem(`Started account: ${account.name}`, 'success');
-    
-    // Эмуляция запуска Steam
-    setTimeout(() => {
-      this.updateAccount(accountId, {
-        status: 'online',
-        farming: false,
-        currentGame: null
-      });
-    }, 2000);
-
-    return true;
-  }
-
-  stopAccount(accountId) {
-    const account = this.getAccount(accountId);
-    if (!account) return false;
-
-    account.status = 'offline';
-    account.farming = false;
-    account.currentGame = null;
-    
-    this.saveAccounts();
-    logSystem(`Stopped account: ${account.name}`, 'info');
-    
-    return true;
-  }
-
-  startFarming(accountId, game) {
-    const account = this.getAccount(accountId);
-    if (!account) return false;
-    if (account.status === 'offline') return false;
-
-    account.status = 'farming';
-    account.farming = true;
-    account.currentGame = game || account.game;
-    
-    this.saveAccounts();
-    logSystem(`Started farming ${account.currentGame} on: ${account.name}`, 'success');
-    
-    // Эмуляция фарминга
-    this.simulateFarming(accountId);
-    
-    return true;
-  }
-
-  simulateFarming(accountId) {
-    const account = this.getAccount(accountId);
-    if (!account || !account.farming) return;
-
-    // Каждую минуту обновляем время
-    const farmingInterval = setInterval(() => {
-      if (!account.farming) {
-        clearInterval(farmingInterval);
-        return;
-      }
-
-      // Увеличиваем время фарминга
-      account.farmingHours += 1/60;
-      
-      // Случайное получение дропа (10% шанс в час)
-      if (Math.random() < 0.1/60) {
-        account.hasNewDrop = true;
-        account.totalDrops = (account.totalDrops || 0) + 1;
-        
-        const drop = this.generateRandomDrop(account.currentGame);
-        account.lastDrop = drop;
-        
-        io.emit('new-drop', {
-          accountId,
-          drop: drop,
-          timestamp: new Date().toISOString()
-        });
-        
-        logSystem(`New drop on ${account.name}: ${drop.name}`, 'info');
-      }
-
-      this.saveAccounts();
-    }, 60000);
-
-    // Сохраняем интервал для очистки
-    account._farmingInterval = farmingInterval;
-  }
-
-  generateRandomDrop(game) {
-    const drops = {
-      'CS2': [
-        { name: "CS:GO Weapon Case", price: 0.35, rarity: "common" },
-        { name: "Operation Phoenix Weapon Case", price: 0.85, rarity: "rare" },
-        { name: "Prisma 2 Case", price: 0.45, rarity: "rare" },
-        { name: "Fracture Case", price: 0.25, rarity: "common" },
-        { name: "AK-47 | Redline", price: 15.50, rarity: "covert" },
-        { name: "AWP | Asiimov", price: 45.00, rarity: "covert" },
-        { name: "★ Karambit | Doppler", price: 1200.00, rarity: "extraordinary" }
-      ],
-      'Dota 2': [
-        { name: "Treasure of the Crimson Witness", price: 35.00, rarity: "immortal" },
-        { name: "Arcana | Terrorblade", price: 45.00, rarity: "arcana" },
-        { name: "Immortal Treasure I", price: 3.50, rarity: "rare" }
-      ],
-      'TF2': [
-        { name: "Mann Co. Supply Crate Key", price: 2.50, rarity: "common" },
-        { name: "Unusual Hat", price: 25.00, rarity: "rare" }
-      ]
-    };
-
-    const gameDrops = drops[game] || drops['CS2'];
-    return gameDrops[Math.floor(Math.random() * gameDrops.length)];
-  }
-
-  claimDrop(accountId, strategy = 'most_expensive') {
-    const account = this.getAccount(accountId);
-    if (!account || !account.hasNewDrop) return null;
-
-    const drop = account.lastDrop;
-    if (!drop) return null;
-
-    account.hasNewDrop = false;
-    account.totalProfit = (account.totalProfit || 0) + drop.price;
-    
-    // Добавляем в инвентарь
-    if (!account.inventory) account.inventory = [];
-    account.inventory.push({
-      id: uuidv4(),
-      name: drop.name,
-      price: drop.price,
-      rarity: drop.rarity,
-      acquired: new Date().toISOString(),
-      marketable: true,
-      tradable: true
-    });
-
-    this.saveAccounts();
-    
-    io.emit('drop-claimed', {
-      accountId,
-      drop: drop,
-      totalProfit: account.totalProfit
-    });
-
-    logSystem(`Claimed drop on ${account.name}: ${drop.name} ($${drop.price})`, 'success');
-    
-    return drop;
-  }
-
-  getInventory(accountId) {
-    const account = this.getAccount(accountId);
-    return account ? account.inventory || [] : [];
-  }
-
-  listItemOnMarket(accountId, itemId, price) {
-    const account = this.getAccount(accountId);
-    if (!account || !account.inventory) return null;
-
-    const itemIndex = account.inventory.findIndex(item => item.id === itemId);
-    if (itemIndex === -1) return null;
-
-    const item = account.inventory[itemIndex];
-    
-    // Эмуляция выставления на рынок
-    const listing = {
-      id: uuidv4(),
-      accountId,
-      item: item,
-      price: price,
-      listedAt: new Date().toISOString(),
-      status: 'active'
-    };
-
-    // В реальном проекте здесь бы сохранялось в БД продаж
-    logSystem(`Listed item on market: ${item.name} for $${price}`, 'info');
-    
-    // Эмуляция продажи (случайная через 1-60 минут)
-    const saleTime = Math.random() * 60 * 60000 + 60000;
-    setTimeout(() => {
-      this.simulateSale(listing);
-    }, saleTime);
-
-    return listing;
-  }
-
-  simulateSale(listing) {
-    const account = this.getAccount(listing.accountId);
-    if (!account) return;
-
-    // Удаляем из инвентаря
-    if (account.inventory) {
-      account.inventory = account.inventory.filter(item => item.id !== listing.item.id);
-    }
-
-    // Добавляем прибыль
-    account.totalProfit = (account.totalProfit || 0) + listing.price;
-
-    this.saveAccounts();
-
-    io.emit('item-sold', {
-      accountId: listing.accountId,
-      item: listing.item,
-      price: listing.price,
-      profit: account.totalProfit
-    });
-
-    logSystem(`Sold item: ${listing.item.name} for $${listing.price}`, 'success');
-  }
-}
-
-// Инициализация менеджера аккаунтов
-const accountManager = new AccountManager();
-
-// ================== API ROUTES ==================
-
-// Проверка статуса сервера
-app.get('/api/status', (req, res) => {
-  res.json({
-    status: 'online',
-    version: '2.0.0',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    accounts: accountManager.accounts.size,
-    active: Array.from(accountManager.accounts.values()).filter(a => a.status !== 'offline').length
-  });
-});
-
-// Получить все аккаунты
-app.get('/api/accounts', (req, res) => {
-  const accounts = accountManager.getAllAccounts();
-  res.json(accounts);
-});
-
-// Получить конкретный аккаунт
-app.get('/api/accounts/:id', (req, res) => {
-  const account = accountManager.getAccount(req.params.id);
-  if (account) {
-    res.json(account);
-  } else {
-    res.status(404).json({ error: 'Account not found' });
-  }
-});
-
-// Создать новый аккаунт
-app.post('/api/accounts', (req, res) => {
-  try {
-    const accountData = req.body;
-    
-    // Валидация
-    if (!accountData.login || !accountData.password) {
-      return res.status(400).json({ error: 'Login and password are required' });
-    }
-
-    const newAccount = accountManager.createAccount(accountData);
+    io.emit('account-added', newAccount);
     res.status(201).json(newAccount);
   } catch (error) {
-    console.error('Error creating account:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Обновить аккаунт
-app.put('/api/accounts/:id', (req, res) => {
-  const accountId = req.params.id;
-  const updates = req.body;
-
-  const updatedAccount = accountManager.updateAccount(accountId, updates);
-  if (updatedAccount) {
-    res.json(updatedAccount);
-  } else {
-    res.status(404).json({ error: 'Account not found' });
-  }
-});
-
-// Удалить аккаунт
-app.delete('/api/accounts/:id', (req, res) => {
-  const accountId = req.params.id;
-  
-  if (accountManager.deleteAccount(accountId)) {
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'Account not found' });
+    addLog(`Ошибка создания аккаунта: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Запустить аккаунт
-app.post('/api/accounts/:id/start', (req, res) => {
-  const accountId = req.params.id;
-  
-  if (accountManager.startAccount(accountId)) {
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'Account not found or already started' });
+app.post('/api/accounts/:id/start', async (req, res) => {
+  try {
+    const db = readDatabase();
+    const account = db.accounts.find(a => a.id === req.params.id);
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Аккаунт не найден' });
+    }
+    
+    if (account.status !== 'offline') {
+      return res.status(400).json({ error: 'Аккаунт уже запущен' });
+    }
+    
+    account.status = 'online';
+    account.lastActivity = new Date().toISOString();
+    writeDatabase(db);
+    
+    await steamEmu.startAccount(account.id);
+    
+    io.emit('account-updated', {
+      id: account.id,
+      status: 'online',
+      farming: false
+    });
+    
+    addLog(`Аккаунт ${account.name} запущен`, 'success');
+    res.json({ success: true, account });
+  } catch (error) {
+    addLog(`Ошибка запуска аккаунта: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Остановить аккаунт
-app.post('/api/accounts/:id/stop', (req, res) => {
-  const accountId = req.params.id;
-  
-  if (accountManager.stopAccount(accountId)) {
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'Account not found' });
+app.post('/api/accounts/:id/stop', async (req, res) => {
+  try {
+    const db = readDatabase();
+    const account = db.accounts.find(a => a.id === req.params.id);
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Аккаунт не найден' });
+    }
+    
+    account.status = 'offline';
+    account.farming = false;
+    account.lastActivity = new Date().toISOString();
+    writeDatabase(db);
+    
+    steamEmu.stopAccount(account.id);
+    
+    io.emit('account-updated', {
+      id: account.id,
+      status: 'offline',
+      farming: false
+    });
+    
+    addLog(`Аккаунт ${account.name} остановлен`, 'info');
+    res.json({ success: true, account });
+  } catch (error) {
+    addLog(`Ошибка остановки аккаунта: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Начать фарминг
-app.post('/api/accounts/:id/farm', (req, res) => {
-  const accountId = req.params.id;
-  const { game } = req.body;
-  
-  if (accountManager.startFarming(accountId, game)) {
-    res.json({ success: true });
-  } else {
-    res.status(400).json({ error: 'Cannot start farming' });
+app.post('/api/accounts/:id/farm', async (req, res) => {
+  try {
+    const db = readDatabase();
+    const account = db.accounts.find(a => a.id === req.params.id);
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Аккаунт не найден' });
+    }
+    
+    if (account.status === 'offline') {
+      return res.status(400).json({ error: 'Аккаунт должен быть онлайн' });
+    }
+    
+    const game = req.body.game || account.game;
+    
+    account.status = 'farming';
+    account.farming = true;
+    account.currentGame = game;
+    account.lastActivity = new Date().toISOString();
+    writeDatabase(db);
+    
+    await steamEmu.startFarming(account.id, game);
+    
+    io.emit('account-updated', {
+      id: account.id,
+      status: 'farming',
+      farming: true,
+      currentGame: game
+    });
+    
+    addLog(`Фарминг ${game} запущен на ${account.name}`, 'success');
+    res.json({ success: true, account });
+  } catch (error) {
+    addLog(`Ошибка запуска фарминга: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Получить дроп
 app.post('/api/accounts/:id/claim-drop', (req, res) => {
-  const accountId = req.params.id;
-  const { strategy } = req.body;
-  
-  const drop = accountManager.claimDrop(accountId, strategy);
-  if (drop) {
-    res.json({ success: true, drop });
-  } else {
-    res.status(400).json({ error: 'No drop available' });
-  }
-});
-
-// Получить инвентарь
-app.get('/api/accounts/:id/inventory', (req, res) => {
-  const accountId = req.params.id;
-  const inventory = accountManager.getInventory(accountId);
-  res.json(inventory);
-});
-
-// Выставить предмет на рынок
-app.post('/api/market/list', (req, res) => {
-  const { accountId, itemId, price } = req.body;
-  
-  if (!accountId || !itemId || !price) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  const listing = accountManager.listItemOnMarket(accountId, itemId, price);
-  if (listing) {
-    res.json({ success: true, listing });
-  } else {
-    res.status(400).json({ error: 'Failed to list item' });
-  }
-});
-
-// Массовые действия
-app.post('/api/bulk-action', (req, res) => {
-  const { action, accountIds, params } = req.body;
-  
   try {
-    let results = [];
+    const db = readDatabase();
+    const account = db.accounts.find(a => a.id === req.params.id);
     
-    switch(action) {
-      case 'start':
-        accountIds.forEach(id => {
-          results.push({
-            accountId: id,
-            success: accountManager.startAccount(id)
-          });
-        });
-        break;
-        
-      case 'stop':
-        accountIds.forEach(id => {
-          results.push({
-            accountId: id,
-            success: accountManager.stopAccount(id)
-          });
-        });
-        break;
-        
-      case 'farm':
-        accountIds.forEach(id => {
-          results.push({
-            accountId: id,
-            success: accountManager.startFarming(id, params?.game)
-          });
-        });
-        break;
-        
-      case 'claim-drops':
-        accountIds.forEach(id => {
-          const account = accountManager.getAccount(id);
-          if (account && account.hasNewDrop) {
-            accountManager.claimDrop(id, params?.strategy);
-            results.push({
-              accountId: id,
-              success: true
-            });
-          }
-        });
-        break;
+    if (!account) {
+      return res.status(404).json({ error: 'Аккаунт не найден' });
     }
     
-    res.json({ success: true, results });
+    const drop = steamEmu.generateDrop(account.game);
+    
+    account.hasNewDrop = false;
+    account.totalProfit = (account.totalProfit || 0) + drop.price;
+    account.totalDrops = (account.totalDrops || 0) + 1;
+    
+    if (!account.inventory) account.inventory = [];
+    account.inventory.push({
+      ...drop,
+      acquired: new Date().toISOString(),
+      marketable: true,
+      tradable: true
+    });
+    
+    writeDatabase(db);
+    
+    io.emit('drop-claimed', {
+      accountId: account.id,
+      drop,
+      totalProfit: account.totalProfit
+    });
+    
+    addLog(`${account.name}: получен дроп ${drop.name} ($${drop.price})`, 'success');
+    res.json({ success: true, drop });
   } catch (error) {
+    addLog(`Ошибка получения дропа: ${error.message}`, 'error');
     res.status(500).json({ error: error.message });
   }
 });
 
-// ================== STATIC FILES ==================
-
-// Главная страница
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// Инвентарь
+app.get('/api/accounts/:id/inventory', (req, res) => {
+  const db = readDatabase();
+  const account = db.accounts.find(a => a.id === req.params.id);
+  
+  if (!account) {
+    return res.status(404).json({ error: 'Аккаунт не найден' });
+  }
+  
+  res.json(account.inventory || []);
 });
 
-// Telegram Web App
-app.get('/telegram', (req, res) => {
-  res.sendFile(path.join(__dirname, 'telegram-app.html'));
+// Выставить на рынок
+app.post('/api/market/list', (req, res) => {
+  try {
+    const { accountId, itemId, price } = req.body;
+    const db = readDatabase();
+    const account = db.accounts.find(a => a.id === accountId);
+    
+    if (!account) {
+      return res.status(404).json({ error: 'Аккаунт не найден' });
+    }
+    
+    const itemIndex = account.inventory?.findIndex(i => i.id === itemId);
+    if (itemIndex === -1) {
+      return res.status(404).json({ error: 'Предмет не найден' });
+    }
+    
+    const item = account.inventory[itemIndex];
+    account.inventory.splice(itemIndex, 1);
+    
+    const listing = {
+      id: uuidv4(),
+      item,
+      price,
+      listedAt: new Date().toISOString(),
+      status: 'active'
+    };
+    
+    if (!account.marketListings) account.marketListings = [];
+    account.marketListings.push(listing);
+    
+    writeDatabase(db);
+    
+    // Эмуляция продажи
+    setTimeout(() => {
+      const updatedDb = readDatabase();
+      const updatedAccount = updatedDb.accounts.find(a => a.id === accountId);
+      if (updatedAccount) {
+        const listingIndex = updatedAccount.marketListings?.findIndex(l => l.id === listing.id);
+        if (listingIndex !== -1) {
+          updatedAccount.marketListings[listingIndex].status = 'sold';
+          updatedAccount.marketListings[listingIndex].soldAt = new Date().toISOString();
+          updatedAccount.totalProfit = (updatedAccount.totalProfit || 0) + price;
+          
+          writeDatabase(updatedDb);
+          
+          io.emit('item-sold', {
+            accountId,
+            item,
+            price,
+            profit: updatedAccount.totalProfit
+          });
+          
+          addLog(`${updatedAccount.name}: продан ${item.name} за $${price}`, 'success');
+        }
+      }
+    }, Math.random() * 30000 + 10000); // Продажа через 10-40 секунд
+    
+    addLog(`${account.name}: выставил ${item.name} за $${price}`, 'info');
+    res.json({ success: true, listing });
+  } catch (error) {
+    addLog(`Ошибка выставления на рынок: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Массовые действия
+app.post('/api/bulk-action', async (req, res) => {
+  try {
+    const { action, accountIds, params } = req.body;
+    const db = readDatabase();
+    const results = [];
+    
+    for (const accountId of accountIds) {
+      const account = db.accounts.find(a => a.id === accountId);
+      if (!account) {
+        results.push({ accountId, success: false, error: 'Не найден' });
+        continue;
+      }
+      
+      try {
+        switch(action) {
+          case 'start':
+            if (account.status === 'offline') {
+              account.status = 'online';
+              results.push({ accountId, success: true });
+            }
+            break;
+            
+          case 'stop':
+            account.status = 'offline';
+            account.farming = false;
+            steamEmu.stopAccount(accountId);
+            results.push({ accountId, success: true });
+            break;
+            
+          case 'farm':
+            if (account.status !== 'offline' && !account.farming) {
+              account.status = 'farming';
+              account.farming = true;
+              await steamEmu.startFarming(accountId, params?.game || account.game);
+              results.push({ accountId, success: true });
+            }
+            break;
+            
+          case 'claim-drops':
+            if (Math.random() > 0.5) { // 50% шанс что есть дроп
+              const drop = steamEmu.generateDrop(account.game);
+              account.totalProfit = (account.totalProfit || 0) + drop.price;
+              account.totalDrops = (account.totalDrops || 0) + 1;
+              results.push({ accountId, success: true, drop });
+            }
+            break;
+        }
+      } catch (error) {
+        results.push({ accountId, success: false, error: error.message });
+      }
+    }
+    
+    writeDatabase(db);
+    
+    // Отправляем обновления
+    accountIds.forEach(accountId => {
+      const account = db.accounts.find(a => a.id === accountId);
+      if (account) {
+        io.emit('account-updated', {
+          id: account.id,
+          status: account.status,
+          farming: account.farming
+        });
+      }
+    });
+    
+    addLog(`Массовое действие "${action}" выполнено`, 'info');
+    res.json({ success: true, results });
+  } catch (error) {
+    addLog(`Ошибка массового действия: ${error.message}`, 'error');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Получить логи
+app.get('/api/logs', (req, res) => {
+  const db = readDatabase();
+  res.json(db.logs.slice(0, 50)); // Последние 50 логов
 });
 
 // ================== WebSocket ==================
 io.on('connection', (socket) => {
-  console.log(`🔗 New WebSocket connection: ${socket.id}`);
+  console.log('🔗 Новое подключение WebSocket');
   
-  // Отправляем приветственное сообщение
+  const db = readDatabase();
+  
   socket.emit('welcome', {
-    message: 'Connected to Steam Manager PRO',
+    message: 'Добро пожаловать в Steam Manager PRO v2.0',
     version: '2.0.0',
-    accounts: accountManager.getAllAccounts().length,
+    accounts: db.accounts.length,
     timestamp: new Date().toISOString()
   });
   
-  // Отправляем текущий статус всех аккаунтов
-  socket.emit('accounts-update', accountManager.getAllAccounts());
+  socket.emit('accounts-data', db.accounts);
+  socket.emit('system-logs', db.logs.slice(0, 20));
   
-  // Обработка команд от клиента
-  socket.on('account-command', (data) => {
-    const { command, accountId, params } = data;
-    
-    try {
-      let result = null;
-      
-      switch(command) {
-        case 'start':
-          result = accountManager.startAccount(accountId);
-          break;
-          
-        case 'stop':
-          result = accountManager.stopAccount(accountId);
-          break;
-          
-        case 'farm':
-          result = accountManager.startFarming(accountId, params?.game);
-          break;
-          
-        case 'claim-drop':
-          result = accountManager.claimDrop(accountId, params?.strategy);
-          break;
-          
-        case 'update-settings':
-          result = accountManager.updateAccount(accountId, params);
-          break;
-      }
-      
-      if (result) {
-        socket.emit('command-success', {
-          command,
-          accountId,
-          result
-        });
-        
-        // Рассылаем обновление всем клиентам
-        const account = accountManager.getAccount(accountId);
-        io.emit('account-updated', { accountId, updates: account });
-      } else {
-        socket.emit('command-error', {
-          command,
-          accountId,
-          error: 'Command failed'
-        });
-      }
-    } catch (error) {
-      socket.emit('command-error', {
-        command,
-        accountId,
-        error: error.message
-      });
-    }
-  });
-  
-  // Получение статистики
   socket.on('get-stats', () => {
-    const accounts = accountManager.getAllAccounts();
+    const db = readDatabase();
     const stats = {
-      total: accounts.length,
-      online: accounts.filter(a => a.status !== 'offline').length,
-      farming: accounts.filter(a => a.farming).length,
-      withDrops: accounts.filter(a => a.hasNewDrop).length,
-      totalProfit: accounts.reduce((sum, a) => sum + (a.totalProfit || 0), 0),
-      totalDrops: accounts.reduce((sum, a) => sum + (a.totalDrops || 0), 0)
+      total: db.accounts.length,
+      online: db.accounts.filter(a => a.status !== 'offline').length,
+      farming: db.accounts.filter(a => a.farming).length,
+      withDrops: db.accounts.filter(a => a.hasNewDrop).length,
+      totalProfit: db.accounts.reduce((sum, a) => sum + (a.totalProfit || 0), 0),
+      totalDrops: db.accounts.reduce((sum, a) => sum + (a.totalDrops || 0), 0)
     };
     
     socket.emit('stats-update', stats);
   });
   
   socket.on('disconnect', () => {
-    console.log(`❌ WebSocket disconnected: ${socket.id}`);
+    console.log('❌ WebSocket отключен');
   });
 });
 
-// ================== BACKGROUND TASKS ==================
+// ================== РОУТЫ ФРОНТЕНДА ==================
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
-// Обновление времени работы каждую минуту
-setInterval(() => {
-  const accounts = accountManager.getAllAccounts();
-  
-  accounts.forEach(account => {
-    if (account.status !== 'offline') {
-      const timeMatch = account.uptime?.match(/(\d+)ч\s*(\d+)м/);
-      if (timeMatch) {
-        let hours = parseInt(timeMatch[1]);
-        let minutes = parseInt(timeMatch[2]) + 1;
-        
-        if (minutes >= 60) {
-          hours++;
-          minutes = 0;
-        }
-        
-        accountManager.updateAccount(account.id, {
-          uptime: `${hours}ч ${minutes}м`
-        });
-      }
-    }
-  });
-}, 60000);
+app.get('/telegram', (req, res) => {
+  res.sendFile(path.join(__dirname, 'telegram-app.html'));
+});
 
-// Периодическая проверка безопасности
-setInterval(() => {
-  logSystem('Security check completed', 'info');
-}, 5 * 60 * 1000);
-
-// ================== START SERVER ==================
+// ================== ЗАПУСК СЕРВЕРА ==================
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`
   🚀 =========================================
   🎮 STEAM MANAGER PRO v2.0
-  🌐 Server running on port: ${PORT}
-  📱 Telegram Web App: /telegram
-  👤 Accounts loaded: ${accountManager.accounts.size}
-  🕐 ${new Date().toLocaleString()}
+  🌐 Сервер запущен: http://localhost:${PORT}
+  📱 Telegram Web App: http://localhost:${PORT}/telegram
+  🔧 Режим: Эмуляция Steam
+  ⚡ Все функции активны
   🚀 =========================================
   `);
   
-  console.log('📁 Available routes:');
-  console.log('   GET  /              - Main interface');
-  console.log('   GET  /telegram      - Telegram Web App');
-  console.log('   GET  /api/status    - Server status');
-  console.log('   GET  /api/accounts  - Get all accounts');
-  console.log('   POST /api/accounts  - Create new account');
+  addLog(`Сервер запущен на порту ${PORT}`, 'success');
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 Received SIGTERM, shutting down...');
-  
-  // Сохраняем все данные
-  accountManager.saveAccounts();
-  
-  server.close(() => {
-    console.log('✅ Server stopped gracefully');
-    process.exit(0);
-  });
-});
-
-module.exports = { app, server, accountManager };
+// Автосохранение
+setInterval(() => {
+  addLog('Автосохранение данных', 'info');
+}, 60000);
