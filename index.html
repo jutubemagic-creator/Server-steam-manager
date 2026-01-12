@@ -554,3 +554,188 @@ farm2:asdfgh789:Фарминг 2" rows="6"></textarea>
     <script src="script.js"></script>
 </body>
 </html>
+
+<!-- Вставьте этот блок ПОСЛЕ блока с модалкой массовых действий в вашем index.html -->
+
+<!-- Модальное окно инвентаря -->
+<div class="modal" id="inventory-modal">
+    <div class="modal-content wide-modal">
+        <div class="modal-header">
+            <h3><i class="fas fa-box-open"></i> Инвентарь аккаунта: <span id="inventory-account-name"></span></h3>
+            <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="inventory-stats">
+                <div class="stat-item">
+                    <i class="fas fa-box"></i>
+                    <div>
+                        <h4>Всего предметов</h4>
+                        <p class="stat-value" id="total-items">0</p>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-dollar-sign"></i>
+                    <div>
+                        <h4>Общая стоимость</h4>
+                        <p class="stat-value" id="total-inventory-value">$0</p>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-crown"></i>
+                    <div>
+                        <h4>Самый дорогой</h4>
+                        <p class="stat-value" id="most-expensive-item">$0</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="inventory-filters">
+                <select id="inventory-sort">
+                    <option value="price_desc">По цене (дорогие)</option>
+                    <option value="price_asc">По цене (дешевые)</option>
+                    <option value="name">По названию</option>
+                    <option value="date">По дате получения</option>
+                </select>
+                <select id="inventory-rarity">
+                    <option value="all">Все редкости</option>
+                    <option value="common">Обычные</option>
+                    <option value="uncommon">Необычные</option>
+                    <option value="rare">Редкие</option>
+                    <option value="epic">Эпические</option>
+                    <option value="legendary">Легендарные</option>
+                </select>
+                <input type="text" id="inventory-search" placeholder="Поиск предметов...">
+            </div>
+            
+            <div class="inventory-grid" id="inventory-items">
+                <!-- Предметы будут загружены динамически -->
+            </div>
+            
+            <div class="inventory-actions">
+                <button class="btn btn-success" id="sell-selected-items">
+                    <i class="fas fa-shopping-cart"></i> Продать выбранные
+                </button>
+                <button class="btn btn-warning" id="transfer-items">
+                    <i class="fas fa-exchange-alt"></i> Переместить
+                </button>
+                <button class="btn btn-info" id="inventory-export">
+                    <i class="fas fa-file-export"></i> Экспорт списка
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно торговой площадки -->
+<div class="modal" id="marketplace-modal">
+    <div class="modal-content wide-modal">
+        <div class="modal-header">
+            <h3><i class="fas fa-store"></i> Торговая площадка Steam</h3>
+            <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="marketplace-tabs">
+                <button class="market-tab active" data-tab="sell">Продажа предметов</button>
+                <button class="market-tab" data-tab="buy">Покупка предметов</button>
+                <button class="market-tab" data-tab="history">История операций</button>
+            </div>
+            
+            <div class="marketplace-content">
+                <div class="tab-content active" id="tab-sell">
+                    <div class="sell-form">
+                        <div class="form-group">
+                            <label>Выберите аккаунт:</label>
+                            <select id="sell-account">
+                                <!-- Аккаунты загружаются динамически -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Выберите предмет:</label>
+                            <select id="sell-item">
+                                <!-- Предметы загружаются динамически -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Цена продажи ($):</label>
+                            <input type="number" id="sell-price" step="0.01" min="0.01" placeholder="0.00">
+                            <div class="price-suggestions">
+                                <small>Рекомендуемые цены: 
+                                    <span class="price-suggestion" data-price="0.10">$0.10</span>
+                                    <span class="price-suggestion" data-price="0.50">$0.50</span>
+                                    <span class="price-suggestion" data-price="1.00">$1.00</span>
+                                    <span class="price-suggestion" data-price="5.00">$5.00</span>
+                                </small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Срок продажи:</label>
+                            <select id="sell-duration">
+                                <option value="1">1 день</option>
+                                <option value="3">3 дня</option>
+                                <option value="7" selected>7 дней</option>
+                                <option value="14">14 дней</option>
+                                <option value="30">30 дней</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-success" id="list-item-btn">
+                            <i class="fas fa-tag"></i> Выставить на продажу
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-buy">
+                    <div class="buy-search">
+                        <input type="text" id="market-search" placeholder="Название предмета...">
+                        <button class="btn btn-primary">
+                            <i class="fas fa-search"></i> Поиск
+                        </button>
+                    </div>
+                    <div class="market-items" id="market-items-list">
+                        <!-- Список предметов на рынке -->
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="tab-history">
+                    <div class="history-list" id="market-history">
+                        <!-- История операций -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно настроек Steam Guard -->
+<div class="modal" id="steam-guard-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-mobile-alt"></i> Steam Guard настройки</h3>
+            <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="steam-guard-info">
+                <p>Добавьте Shared Secret для автоматической генерации кодов 2FA.</p>
+                <div class="form-group">
+                    <label for="shared-secret-input">Shared Secret:</label>
+                    <input type="text" id="shared-secret-input" placeholder="Ваш shared secret...">
+                    <small>Получить можно через SDA или другие инструменты</small>
+                </div>
+                <div class="form-group">
+                    <label>Текущий код:</label>
+                    <div class="steam-guard-code">
+                        <span id="current-guard-code">XXXXXX</span>
+                        <button class="btn btn-small" id="copy-guard-code">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <small>Обновляется каждые 30 секунд</small>
+                </div>
+                <div class="steam-guard-test">
+                    <button class="btn btn-info" id="test-steam-guard">
+                        <i class="fas fa-check"></i> Проверить код
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
